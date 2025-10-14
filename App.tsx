@@ -1126,11 +1126,11 @@ const AssignmentsPage = () => {
     const allRequirements = useMemo(() => {
         return data.classes.flatMap(c => 
             c.curriculum.flatMap(item => 
-                Array(item.hours).fill({
+                Array.from({ length: item.hours }, () => ({
                     lessonName: item.lessonName,
                     teacherId: item.teacherId,
                     classId: c.id
-                })
+                }))
             )
         );
     }, [data.classes]);
@@ -1203,6 +1203,101 @@ const AssignmentsPage = () => {
         return conflicts.join('\n\n');
     };
 
+    // Arka arkaya ders kuralı kontrolü
+    const checkConsecutiveLessonsRule = (assignment: Omit<Assignment, 'id'>, allAssignments: Assignment[]) => {
+        const { day, hour, classId, lessonName } = assignment;
+        
+        // Bu sınıfın bu dersi için toplam saat sayısını bul
+        const classData = data.classes.find(c => c.id === classId);
+        if (!classData) return { isValid: true, warning: null };
+
+        const curriculumItem = classData.curriculum?.find(item => item.lessonName === lessonName);
+        if (!curriculumItem) return { isValid: true, warning: null };
+
+        const totalHours = curriculumItem.hours;
+        
+        // Bu sınıfın aynı dersten mevcut atamalarını bul (yeni atama hariç)
+        const existingLessons = allAssignments.filter(a => 
+            a.classId === classId && 
+            a.lessonName === lessonName &&
+            !(a.day === day && a.hour === hour)
+        );
+
+        // Kural kontrolü: 
+        // - 2+ saatlik dersler: ilk 2 ders arka arkaya olmalı
+        // - Çift saatlik dersler: ikişerli bloklar halinde olmalı
+        
+        if (totalHours < 2) {
+            return { isValid: true, warning: null }; // 1 saatlik dersler için kural yok
+        }
+
+        // Tüm dersleri (mevcut + yeni) topla
+        const allLessonsIncludingNew = [...existingLessons, { day, hour, classId, lessonName }];
+        
+        // Çift saatlik dersler için özel kontrol
+        if (totalHours % 2 === 0) {
+            // Her gün için çiftli kontrol yap
+            const lessonsByDay = new Map<number, any[]>();
+            allLessonsIncludingNew.forEach(lesson => {
+                if (!lessonsByDay.has(lesson.day)) {
+                    lessonsByDay.set(lesson.day, []);
+                }
+                lessonsByDay.get(lesson.day)!.push(lesson);
+            });
+
+            // Her gün içinde çiftli olup olmadığını kontrol et
+            for (const [dayNum, dayLessons] of lessonsByDay) {
+                if (dayLessons.length === 2) {
+                    const hours = dayLessons.map(l => l.hour).sort((a, b) => a - b);
+                    if (hours[1] - hours[0] === 1) {
+                        return { isValid: true, warning: null }; // Çiftli bulundu
+                    }
+                }
+            }
+        }
+
+        // 2+ saatlik dersler için: ilk 2 ders arka arkaya olmalı
+        if (totalHours >= 2) {
+            // Tüm dersleri saat sırasına göre sırala
+            const allSorted = allLessonsIncludingNew
+                .map(lesson => ({ ...lesson, datetime: lesson.day * 24 + lesson.hour }))
+                .sort((a, b) => a.datetime - b.datetime);
+
+            // İlk 2 dersin arka arkaya olup olmadığını kontrol et
+            if (allSorted.length >= 2) {
+                const first = allSorted[0];
+                const second = allSorted[1];
+                
+                // Aynı gün ve ardışık saatler mi?
+                if (first.day === second.day && second.hour - first.hour === 1) {
+                    return { isValid: true, warning: null }; // İlk 2 ders arka arkaya
+                }
+            }
+            
+            // Eğer henüz 2 dersten az varsa, sorun yok
+            if (allSorted.length < 2) {
+                return { isValid: true, warning: null };
+            }
+        }
+
+        // Kural ihlali, uyarı ver
+        const warnings = [];
+        if (totalHours >= 2 && totalHours % 2 === 0) {
+            warnings.push(`� ÇIFT SAAT KURALI: "${lessonName}" dersi ${totalHours} saat (çift sayı) olduğu için ikişerli bloklar halinde gelmeli`);
+        } else if (totalHours >= 2) {
+            warnings.push(`� DERS KURALI: "${lessonName}" dersi ${totalHours} saatlik olduğu için ilk 2 ders arka arkaya gelmeli`);
+        }
+
+        const existingSchedule = existingLessons.map(lesson => 
+            `${DAYS_OF_WEEK[lesson.day]} ${lessonTimes[lesson.hour]?.label || `${lesson.hour + 1}. Ders`}`
+        ).join(', ');
+
+        return {
+            isValid: false,
+            warning: warnings.join('\n') + `\n\n📅 Mevcut "${lessonName}" dersleri: ${existingSchedule}\n\n💡 İpucu: ${totalHours % 2 === 0 ? 'Dersleri ikişerli bloklar halinde' : 'İlk 2 dersi arka arkaya'} yerleştirin`
+        };
+    };
+
     const handleManualSave = () => {
         if (!assignmentForm.lessonName || !assignmentForm.teacherId || !assignmentForm.classId || selectedSlot === null) {
             alert("Lütfen Ders, Öğretmen ve Sınıf alanlarını doldurun.");
@@ -1219,9 +1314,30 @@ const AssignmentsPage = () => {
         };
 
         const conflict = checkConflict(newAssignment, data.assignments);
-        if (conflict) {
-            alert(`Çakışma Tespit Edildi: ${conflict}`);
-            return;
+        const consecutiveCheck = checkConsecutiveLessonsRule(newAssignment, data.assignments);
+        
+        if (conflict || !consecutiveCheck.isValid) {
+            let warningMessage = '';
+            
+            if (conflict) {
+                const conflictDetails = getConflictDetails(newAssignment, data.assignments);
+                warningMessage += `⚠️ ÇAKIŞMA TESPİT EDİLDİ!\n\n${conflictDetails}\n\n`;
+            }
+            
+            if (!consecutiveCheck.isValid) {
+                if (conflict) warningMessage += `─────────────────────\n\n`;
+                warningMessage += `📋 DERS KURALLARI İHLALİ!\n\n${consecutiveCheck.warning}\n\n`;
+            }
+            
+            if (conflict) {
+                alert(`${warningMessage}❌ Çakışma nedeniyle ders eklenemez!`);
+                return;
+            } else {
+                const shouldProceed = window.confirm(`${warningMessage}Yine de bu dersi eklemek istiyor musunuz?`);
+                if (!shouldProceed) {
+                    return;
+                }
+            }
         }
         
         setData(prev => ({
@@ -1269,7 +1385,7 @@ const AssignmentsPage = () => {
             return;
         }
 
-        // Çakışma kontrolü yap
+        // Çakışma ve kural kontrolü yap
         const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
         if (draggedAssignment) {
             const tempAssignment: Omit<Assignment, 'id'> = {
@@ -1285,9 +1401,12 @@ const AssignmentsPage = () => {
             );
 
             const conflict = checkConflict(tempAssignment, otherAssignments);
+            const consecutiveCheck = checkConsecutiveLessonsRule(tempAssignment, otherAssignments);
             
             if (conflict) {
                 e.dataTransfer.dropEffect = 'none';
+            } else if (!consecutiveCheck.isValid) {
+                e.dataTransfer.dropEffect = 'copy'; // Uyarı ile taşınabilir
             } else {
                 e.dataTransfer.dropEffect = 'move';
             }
@@ -1344,18 +1463,30 @@ const AssignmentsPage = () => {
         );
 
         const conflict = checkConflict(tempAssignment, otherAssignments);
+        const consecutiveCheck = checkConsecutiveLessonsRule(tempAssignment, otherAssignments);
 
-        if (conflict) {
-            // Çakışan dersleri bul ve detaylarını göster
-            const conflictDetails = getConflictDetails(tempAssignment, otherAssignments);
-            const shouldProceed = window.confirm(
-                `⚠️ ÇAKIŞMA TESPİT EDİLDİ!\n\n` +
-                `Taşınacak Ders: "${draggedAssignment.lessonName}"\n` +
-                `Hedef: ${DAYS_OF_WEEK[targetDay]} ${lessonTimes[targetHour]?.label || `${targetHour + 1}. Ders`} - ${getEntityName('classes', targetClassId)}\n\n` +
-                `ÇAKIŞMA DETAYLARI:\n${conflictDetails}\n\n` +
-                `Bu çakışmayı göze alarak yine de taşımak istiyor musunuz?\n` +
-                `(Çakışan derslerin programı bozulabilir!)`
-            );
+        if (conflict || !consecutiveCheck.isValid) {
+            let warningMessage = '';
+            
+            if (conflict) {
+                const conflictDetails = getConflictDetails(tempAssignment, otherAssignments);
+                warningMessage += `⚠️ ÇAKIŞMA TESPİT EDİLDİ!\n\n`;
+                warningMessage += `Taşınacak Ders: "${draggedAssignment.lessonName}"\n`;
+                warningMessage += `Hedef: ${DAYS_OF_WEEK[targetDay]} ${lessonTimes[targetHour]?.label || `${targetHour + 1}. Ders`} - ${getEntityName('classes', targetClassId)}\n\n`;
+                warningMessage += `ÇAKIŞMA DETAYLARI:\n${conflictDetails}\n\n`;
+            }
+            
+            if (!consecutiveCheck.isValid) {
+                if (conflict) warningMessage += `─────────────────────\n\n`;
+                warningMessage += `📋 DERS KURALLARI İHLALİ!\n\n`;
+                warningMessage += consecutiveCheck.warning + '\n\n';
+            }
+            
+            warningMessage += conflict 
+                ? `Bu çakışma ve kural ihlalini göze alarak yine de taşımak istiyor musunuz?\n(Program bütünlüğü bozulabilir!)`
+                : `Bu kural ihlalini göze alarak yine de taşımak istiyor musunuz?\n(Ders programı pedagojik açıdan uygun olmayabilir!)`;
+            
+            const shouldProceed = window.confirm(warningMessage);
             
             if (!shouldProceed) {
                 setDraggedItem(null);
@@ -1505,7 +1636,62 @@ const AssignmentsPage = () => {
                             continue;
                         }
 
-                        const baseScore = getScore(teacherStatus) + getScore(classStatus);
+                        let baseScore = getScore(teacherStatus) + getScore(classStatus);
+
+                        // Arka arkaya ders kuralı için akıllı scoring
+                        const curriculumItem = classData.curriculum?.find(item => item.lessonName === req.lessonName);
+                        if (curriculumItem) {
+                            const totalHours = curriculumItem.hours;
+                            
+                            // Bu sınıfın aynı dersten mevcut atamalarını kontrol et
+                            const existingSameLessons = existingAssignments
+                                .filter(a => a.classId === req.classId && a.lessonName === req.lessonName);
+                            
+                            if (totalHours >= 2 && totalHours % 2 === 0) {
+                                // Çift saatlik dersler için ikişerli bonus
+                                const hasAdjacentLesson = existingSameLessons.some(existingLesson => {
+                                    if (existingLesson.day === day) {
+                                        const hourDiff = Math.abs(existingLesson.hour - hour);
+                                        return hourDiff === 1;
+                                    }
+                                    return false;
+                                });
+                                
+                                if (hasAdjacentLesson) {
+                                    baseScore += 15; // Çift saatler için büyük bonus
+                                }
+                            } else if (totalHours >= 2) {
+                                // 3+ saatlik dersler için: SADECE ilk 2 ders arka arkaya olsun
+                                const sortedExisting = existingSameLessons
+                                    .map(lesson => ({ ...lesson, datetime: lesson.day * 24 + lesson.hour }))
+                                    .sort((a, b) => a.datetime - b.datetime);
+                                
+                                if (sortedExisting.length === 0) {
+                                    // İlk ders, normal puan
+                                    baseScore += 3;
+                                } else if (sortedExisting.length === 1) {
+                                    // İkinci ders - ilkinin yanında olmalı
+                                    const firstLesson = sortedExisting[0];
+                                    if (firstLesson.day === day && Math.abs(firstLesson.hour - hour) === 1) {
+                                        baseScore += 25; // İkinci ders arka arkaya gelirse çok büyük bonus
+                                    } else {
+                                        baseScore -= 15; // İkinci ders arka arkaya gelmezse büyük penalty
+                                    }
+                                } else if (sortedExisting.length >= 2) {
+                                    // 3. ve sonraki dersler - arka arkaya GELMEMELİ
+                                    const lastTwoLessons = sortedExisting.slice(-2);
+                                    const isConsecutiveWithLast = lastTwoLessons.some(lesson => 
+                                        lesson.day === day && Math.abs(lesson.hour - hour) === 1
+                                    );
+                                    
+                                    if (isConsecutiveWithLast) {
+                                        baseScore -= 20; // 3. ders arka arkaya gelirse büyük penalty
+                                    } else {
+                                        baseScore += 5; // 3. ders arka arkaya gelmezse bonus
+                                    }
+                                }
+                            }
+                        }
 
                         if (classrooms.length === 0) {
                             possibleSlots.push({ day, hour, classroomId: undefined, score: baseScore });
@@ -1529,23 +1715,86 @@ const AssignmentsPage = () => {
             const unassigned: any[] = [];
             const newOccupiedSlots = new Set(occupiedSlots);
 
+            // Kesin çözüm: 3+ saatlik dersler için dinamik slot filtreleme
             for (const item of scoredSlotsByReq) {
-                item.possibleSlots.sort((a, b) => b.score - a.score);
+                const classData = classes.find(c => c.id === item.req.classId);
+                const curriculumItem = classData?.curriculum?.find(ci => ci.lessonName === item.req.lessonName);
+                const totalHours = curriculumItem?.hours || 1;
+                
+                // Bu sınıfın bu dersten kaç tane atanmış?
+                const sameClassLessonAssignments = newAssignments.filter(a => 
+                    a.classId === item.req.classId && a.lessonName === item.req.lessonName
+                );
+                const assignedCount = sameClassLessonAssignments.length;
+                
+                // Slotları filtrele ve sırala
+                let validSlots = [...item.possibleSlots];
+                
+                // 3+ saatlik dersler için özel filtreleme
+                if (totalHours >= 3) {
+                    if (assignedCount === 0) {
+                        // İlk ders: Normal yerleştir
+                        // Hiçbir kısıtlama yok
+                    } else if (assignedCount === 1) {
+                        // İkinci ders: İki seçenek sun
+                        // 1) İlk dersin yanına koy (arka arkaya olsun)
+                        // 2) Veya uzağa koy (arka arkaya olmasın)
+                        // En yüksek skorlu olanı seçsin
+                        // Filtreleme yapma, scoring'e bırak
+                    } else if (assignedCount >= 2) {
+                        // 3. ve sonraki dersler için kontrol
+                        // Eğer zaten 2 ders arka arkaya ise, 3. ders arka arkaya olmamalı
+                        // Eğer 2 ders arka arkaya değilse, 3. ders birinin yanına konabilir (2 ders arka arkaya olsun diye)
+                        
+                        // Mevcut derslerden herhangi 2'si arka arkaya mı?
+                        let hasConsecutivePair = false;
+                        for (let i = 0; i < sameClassLessonAssignments.length; i++) {
+                            for (let j = i + 1; j < sameClassLessonAssignments.length; j++) {
+                                const lesson1 = sameClassLessonAssignments[i];
+                                const lesson2 = sameClassLessonAssignments[j];
+                                if (lesson1.day === lesson2.day && Math.abs(lesson1.hour - lesson2.hour) === 1) {
+                                    hasConsecutivePair = true;
+                                    break;
+                                }
+                            }
+                            if (hasConsecutivePair) break;
+                        }
+                        
+                        if (hasConsecutivePair) {
+                            // Zaten 2 ders arka arkaya var, 3. ders arka arkaya OLMAMALI
+                            validSlots = validSlots.filter(slot => {
+                                return !sameClassLessonAssignments.some(existing => 
+                                    existing.day === slot.day &&
+                                    Math.abs(existing.hour - slot.hour) === 1
+                                );
+                            });
+                        }
+                        // Eğer arka arkaya ders yoksa, 3. ders herhangi birine bitişik konabilir
+                    }
+                }
+                
+                // En iyi skorlu geçerli slotu bul
+                validSlots.sort((a, b) => b.score - a.score);
                 
                 let placed = false;
-                for (const slot of item.possibleSlots) {
+                for (const slot of validSlots) {
                     const teacherKey = `t-${item.req.teacherId}-${slot.day}-${slot.hour}`;
                     const classKey = `c-${item.req.classId}-${slot.day}-${slot.hour}`;
                     const classroomKey = slot.classroomId ? `r-${slot.classroomId}-${slot.day}-${slot.hour}` : undefined;
 
-                    if (!newOccupiedSlots.has(teacherKey) && !newOccupiedSlots.has(classKey) && (!classroomKey || !newOccupiedSlots.has(classroomKey))) {
-                        newAssignments.push({ ...item.req, ...slot, id: generateId() });
-                        newOccupiedSlots.add(teacherKey);
-                        newOccupiedSlots.add(classKey);
-                        if (classroomKey) newOccupiedSlots.add(classroomKey);
-                        placed = true;
-                        break;
+                    // Temel çakışma kontrolü
+                    if (newOccupiedSlots.has(teacherKey) || newOccupiedSlots.has(classKey) || 
+                        (classroomKey && newOccupiedSlots.has(classroomKey))) {
+                        continue;
                     }
+                    
+                    // Her şey tamam, yerleştir
+                    newAssignments.push({ ...item.req, ...slot, id: generateId() });
+                    newOccupiedSlots.add(teacherKey);
+                    newOccupiedSlots.add(classKey);
+                    if (classroomKey) newOccupiedSlots.add(classroomKey);
+                    placed = true;
+                    break;
                 }
 
                 if (!placed) unassigned.push(item.req);
@@ -1669,8 +1918,9 @@ const AssignmentsPage = () => {
                                                     const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
                                                     const isDragged = draggedItem?.sourceClassId === c.id && draggedItem?.sourceDay === dayIndex && draggedItem?.sourceHour === hourIndex;
                                                     
-                                                    // Çakışma kontrolü
+                                                    // Çakışma ve kural kontrolü
                                                     let hasConflict = false;
+                                                    let hasRuleViolation = false;
                                                     if (isDraggedOver && draggedItem && draggedItem.assignmentId !== assignment.id) {
                                                         const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
                                                         if (draggedAssignment) {
@@ -1684,6 +1934,8 @@ const AssignmentsPage = () => {
                                                                 a.id !== draggedItem.assignmentId && a.id !== assignment.id
                                                             );
                                                             hasConflict = !!checkConflict(tempAssignment, otherAssignments);
+                                                            const consecutiveCheck = checkConsecutiveLessonsRule(tempAssignment, otherAssignments);
+                                                            hasRuleViolation = !consecutiveCheck.isValid;
                                                         }
                                                     }
                                                     
@@ -1694,6 +1946,8 @@ const AssignmentsPage = () => {
                                                                 isDraggedOver 
                                                                     ? hasConflict 
                                                                         ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
+                                                                        : hasRuleViolation
+                                                                        ? 'ring-2 ring-yellow-400 bg-yellow-50 dark:bg-yellow-900/30'
                                                                         : 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/30'
                                                                     : ''
                                                             } ${isDragged ? 'opacity-50' : ''}`}
@@ -1724,8 +1978,9 @@ const AssignmentsPage = () => {
                                                 } else {
                                                     const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
                                                     
-                                                    // Boş hücre için çakışma kontrolü
+                                                    // Boş hücre için çakışma ve kural kontrolü
                                                     let hasConflict = false;
+                                                    let hasRuleViolation = false;
                                                     if (isDraggedOver && draggedItem) {
                                                         const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
                                                         if (draggedAssignment) {
@@ -1737,6 +1992,8 @@ const AssignmentsPage = () => {
                                                             };
                                                             const otherAssignments = data.assignments.filter(a => a.id !== draggedItem.assignmentId);
                                                             hasConflict = !!checkConflict(tempAssignment, otherAssignments);
+                                                            const consecutiveCheck = checkConsecutiveLessonsRule(tempAssignment, otherAssignments);
+                                                            hasRuleViolation = !consecutiveCheck.isValid;
                                                         }
                                                     }
                                                     
@@ -1747,7 +2004,9 @@ const AssignmentsPage = () => {
                                                                 isDraggedOver 
                                                                     ? hasConflict 
                                                                         ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
-                                                                        : 'ring-2 ring-green-400 bg-green-50 dark:bg-green-900/30'
+                                                                        : hasRuleViolation
+                                                                            ? 'ring-2 ring-yellow-400 bg-yellow-50 dark:bg-yellow-900/30'
+                                                                            : 'ring-2 ring-green-400 bg-green-50 dark:bg-green-900/30'
                                                                     : ''
                                                             }`}
                                                             onDragOver={(e) => handleDragOver(e, c.id, dayIndex, hourIndex)}
