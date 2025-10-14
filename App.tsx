@@ -2103,7 +2103,7 @@ const ReportsPage = () => {
         return (data[type] as any[])?.find(item => item.id === id)?.name || id
     };
 
-    const handlePdfExport = () => {
+    const handlePdfExport = async () => {
         if (!selectedId) {
             alert("Lütfen bir rapor seçin.");
             return;
@@ -2129,7 +2129,13 @@ const ReportsPage = () => {
             }
             body.push(row);
         });
-        generatePdf(title, headers, body);
+        
+        try {
+            await generatePdf(title, headers, body);
+        } catch (error) {
+            console.error('PDF oluşturma hatası:', error);
+            alert('PDF oluşturulurken bir hata oluştu.');
+        }
     };
     
     const handleJsonImport = (event: React.ChangeEvent<HTMLInputElement>) => {
