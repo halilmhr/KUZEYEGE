@@ -1080,6 +1080,19 @@ const AssignmentsPage = () => {
     const [clearExisting, setClearExisting] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
 
+    // Drag & Drop state'leri
+    const [draggedItem, setDraggedItem] = useState<{
+        assignmentId: string;
+        sourceClassId: string;
+        sourceDay: number;
+        sourceHour: number;
+    } | null>(null);
+    const [dragOverCell, setDragOverCell] = useState<{
+        classId: string;
+        day: number;
+        hour: number;
+    } | null>(null);
+
     // --- Color Generation Logic ---
     const COLORS = useMemo(() => [
         '#ffadad', '#ffd6a5', '#fdffb6', '#caffbf', '#9bf6ff', '#a0c4ff', 
@@ -1148,6 +1161,48 @@ const AssignmentsPage = () => {
         return null;
     };
 
+    const getConflictDetails = (assignment: Omit<Assignment, 'id'>, existingAssignments: Assignment[]) => {
+        const { day, hour, teacherId, classId, classroomId } = assignment;
+        const conflicts: string[] = [];
+
+        // Öğretmen çakışması
+        const teacherConflict = existingAssignments.find(a => a.day === day && a.hour === hour && a.teacherId === teacherId);
+        if (teacherConflict) {
+            conflicts.push(
+                `🧑‍🏫 ÖĞRETMEN ÇAKIŞMASI:\n` +
+                `   • ${getEntityName('teachers', teacherId)} öğretmeni\n` +
+                `   • Aynı saatte "${teacherConflict.lessonName}" dersini\n` +
+                `   • ${getEntityName('classes', teacherConflict.classId)} sınıfında veriyor`
+            );
+        }
+
+        // Sınıf çakışması
+        const classConflict = existingAssignments.find(a => a.day === day && a.hour === hour && a.classId === classId);
+        if (classConflict) {
+            conflicts.push(
+                `🏫 SINIF ÇAKIŞMASI:\n` +
+                `   • ${getEntityName('classes', classId)} sınıfının\n` +
+                `   • Aynı saatte "${classConflict.lessonName}" dersi var\n` +
+                `   • Öğretmen: ${getEntityName('teachers', classConflict.teacherId)}`
+            );
+        }
+
+        // Derslik çakışması
+        if (classroomId) {
+            const classroomConflict = existingAssignments.find(a => a.day === day && a.hour === hour && a.classroomId === classroomId);
+            if (classroomConflict) {
+                conflicts.push(
+                    `🏛️ DERSLİK ÇAKIŞMASI:\n` +
+                    `   • ${getEntityName('classrooms', classroomId)} dersliği\n` +
+                    `   • Aynı saatte "${classroomConflict.lessonName}" için kullanılıyor\n` +
+                    `   • Sınıf: ${getEntityName('classes', classroomConflict.classId)}`
+                );
+            }
+        }
+
+        return conflicts.join('\n\n');
+    };
+
     const handleManualSave = () => {
         if (!assignmentForm.lessonName || !assignmentForm.teacherId || !assignmentForm.classId || selectedSlot === null) {
             alert("Lütfen Ders, Öğretmen ve Sınıf alanlarını doldurun.");
@@ -1183,6 +1238,215 @@ const AssignmentsPage = () => {
                 assignments: prev.assignments.filter(a => !(a.classId === classId && a.day === day && a.hour === hour))
             }));
         }
+    };
+
+    // Drag & Drop Handler'ları
+    const handleDragStart = (e: React.DragEvent, assignment: Assignment, classId: string, day: number, hour: number) => {
+        setDraggedItem({
+            assignmentId: assignment.id,
+            sourceClassId: classId,
+            sourceDay: day,
+            sourceHour: hour
+        });
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/html', '');
+    };
+
+    const handleDragOver = (e: React.DragEvent, classId: string, day: number, hour: number) => {
+        e.preventDefault();
+        
+        if (!draggedItem) {
+            e.dataTransfer.dropEffect = 'none';
+            return;
+        }
+
+        // Aynı hücreye sürükleniyorsa
+        if (draggedItem.sourceClassId === classId && 
+            draggedItem.sourceDay === day && 
+            draggedItem.sourceHour === hour) {
+            e.dataTransfer.dropEffect = 'none';
+            setDragOverCell({ classId, day, hour });
+            return;
+        }
+
+        // Çakışma kontrolü yap
+        const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
+        if (draggedAssignment) {
+            const tempAssignment: Omit<Assignment, 'id'> = {
+                ...draggedAssignment,
+                classId: classId,
+                day: day,
+                hour: hour
+            };
+
+            const otherAssignments = data.assignments.filter(a => 
+                a.id !== draggedItem.assignmentId && 
+                !(a.classId === classId && a.day === day && a.hour === hour)
+            );
+
+            const conflict = checkConflict(tempAssignment, otherAssignments);
+            
+            if (conflict) {
+                e.dataTransfer.dropEffect = 'none';
+            } else {
+                e.dataTransfer.dropEffect = 'move';
+            }
+        }
+        
+        setDragOverCell({ classId, day, hour });
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        // Sadece hücreden tamamen çıkıldığında dragOver'ı kaldır
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+            setDragOverCell(null);
+        }
+    };
+
+    const handleDrop = (e: React.DragEvent, targetClassId: string, targetDay: number, targetHour: number) => {
+        e.preventDefault();
+        setDragOverCell(null);
+
+        if (!draggedItem) return;
+
+        // Aynı hücreye bırakılıyorsa hiçbir şey yapma
+        if (draggedItem.sourceClassId === targetClassId && 
+            draggedItem.sourceDay === targetDay && 
+            draggedItem.sourceHour === targetHour) {
+            setDraggedItem(null);
+            return;
+        }
+
+        // Sürüklenen dersi bul
+        const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
+        if (!draggedAssignment) {
+            setDraggedItem(null);
+            return;
+        }
+
+        // Hedef hücrede zaten bir ders var mı kontrol et
+        const targetAssignment = data.assignments.find(a => 
+            a.classId === targetClassId && a.day === targetDay && a.hour === targetHour
+        );
+
+        // Taşıma için geçici atama oluştur
+        const tempAssignment: Omit<Assignment, 'id'> = {
+            ...draggedAssignment,
+            classId: targetClassId,
+            day: targetDay,
+            hour: targetHour
+        };
+
+        // Çakışma kontrolü - mevcut atamaları filtrele (sürüklenen ve hedef hariç)
+        const otherAssignments = data.assignments.filter(a => 
+            a.id !== draggedItem.assignmentId && 
+            (targetAssignment ? a.id !== targetAssignment.id : true)
+        );
+
+        const conflict = checkConflict(tempAssignment, otherAssignments);
+
+        if (conflict) {
+            // Çakışan dersleri bul ve detaylarını göster
+            const conflictDetails = getConflictDetails(tempAssignment, otherAssignments);
+            const shouldProceed = window.confirm(
+                `⚠️ ÇAKIŞMA TESPİT EDİLDİ!\n\n` +
+                `Taşınacak Ders: "${draggedAssignment.lessonName}"\n` +
+                `Hedef: ${DAYS_OF_WEEK[targetDay]} ${lessonTimes[targetHour]?.label || `${targetHour + 1}. Ders`} - ${getEntityName('classes', targetClassId)}\n\n` +
+                `ÇAKIŞMA DETAYLARI:\n${conflictDetails}\n\n` +
+                `Bu çakışmayı göze alarak yine de taşımak istiyor musunuz?\n` +
+                `(Çakışan derslerin programı bozulabilir!)`
+            );
+            
+            if (!shouldProceed) {
+                setDraggedItem(null);
+                return;
+            }
+        }
+
+        if (targetAssignment) {
+            // Swap işlemi için hedef dersin de çakışma kontrolü
+            const tempSwapAssignment: Omit<Assignment, 'id'> = {
+                ...targetAssignment,
+                classId: draggedItem.sourceClassId,
+                day: draggedItem.sourceDay,
+                hour: draggedItem.sourceHour
+            };
+
+            const swapConflict = checkConflict(tempSwapAssignment, otherAssignments);
+
+            if (swapConflict) {
+                // Yer değiştirme çakışması detayları
+                const swapConflictDetails = getConflictDetails(tempSwapAssignment, otherAssignments);
+                const shouldProceedSwap = window.confirm(
+                    `⚠️ YER DEĞİŞTİRME ÇAKIŞMASI!\n\n` +
+                    `Yer değiştirilecek ders: "${targetAssignment.lessonName}"\n` +
+                    `Yeni konum: ${DAYS_OF_WEEK[draggedItem.sourceDay]} ${lessonTimes[draggedItem.sourceHour]?.label || `${draggedItem.sourceHour + 1}. Ders`} - ${getEntityName('classes', draggedItem.sourceClassId)}\n\n` +
+                    `ÇAKIŞMA DETAYLARI:\n${swapConflictDetails}\n\n` +
+                    `Bu çakışmayı göze alarak yine de yer değiştirmek istiyor musunuz?`
+                );
+                
+                if (!shouldProceedSwap) {
+                    setDraggedItem(null);
+                    return;
+                }
+            }
+
+            // Çakışma yoksa swap işlemini onayla
+            if (window.confirm(
+                `🔄 YER DEĞİŞTİRME İŞLEMİ\n\n` +
+                `Hedef hücrede zaten "${targetAssignment.lessonName}" dersi var.\n\n` +
+                `TAKAS DETAYLARı:\n` +
+                `📚 "${draggedAssignment.lessonName}" ➡️ ${DAYS_OF_WEEK[targetDay]} ${lessonTimes[targetHour]?.label || `${targetHour + 1}. Ders`} (${getEntityName('classes', targetClassId)})\n` +
+                `📚 "${targetAssignment.lessonName}" ➡️ ${DAYS_OF_WEEK[draggedItem.sourceDay]} ${lessonTimes[draggedItem.sourceHour]?.label || `${draggedItem.sourceHour + 1}. Ders`} (${getEntityName('classes', draggedItem.sourceClassId)})\n\n` +
+                `✅ Çakışma tespit edilmedi. Dersleri yer değiştirmek istiyor musunuz?`
+            )) {
+                setData(prev => ({
+                    ...prev,
+                    assignments: prev.assignments.map(a => {
+                        if (a.id === draggedItem.assignmentId) {
+                            return { ...a, classId: targetClassId, day: targetDay, hour: targetHour };
+                        }
+                        if (a.id === targetAssignment.id) {
+                            return { ...a, classId: draggedItem.sourceClassId, day: draggedItem.sourceDay, hour: draggedItem.sourceHour };
+                        }
+                        return a;
+                    })
+                }));
+
+                // Başarı mesajı
+                setTimeout(() => {
+                    const message = swapConflict 
+                        ? `⚠️ Çakışmalı yer değiştirme tamamlandı!\n\n"${draggedAssignment.lessonName}" ↔️ "${targetAssignment.lessonName}"\n\n⚠️ Lütfen program çakışmalarını kontrol edin!`
+                        : `✅ Yer değiştirme başarılı!\n\n"${draggedAssignment.lessonName}" ↔️ "${targetAssignment.lessonName}"`;
+                    alert(message);
+                }, 100);
+            }
+        } else {
+            // Normal taşıma işlemi - çakışma kontrolü zaten yapıldı
+            setData(prev => ({
+                ...prev,
+                assignments: prev.assignments.map(a => 
+                    a.id === draggedItem.assignmentId 
+                        ? { ...a, classId: targetClassId, day: targetDay, hour: targetHour }
+                        : a
+                )
+            }));
+
+            // Başarı mesajı
+            if (conflict) {
+                // Çakışmalı taşıma başarılı
+                setTimeout(() => {
+                    alert(`⚠️ Çakışmalı taşıma tamamlandı!\n\n"${draggedAssignment.lessonName}" dersi taşındı.\n\n⚠️ Lütfen program çakışmalarını kontrol edin!`);
+                }, 100);
+            }
+        }
+
+        setDraggedItem(null);
+    };
+
+    const handleDragEnd = () => {
+        setDraggedItem(null);
+        setDragOverCell(null);
     };
 
     const getEntityName = (type: 'teachers' | 'classes' | 'classrooms', id?: string) => {
@@ -1348,15 +1612,26 @@ const AssignmentsPage = () => {
                 </div>
             </Card>
 
-            <h2 className="text-lg font-semibold mt-8 mb-4">Ders Programı Tablosu</h2>
-            <div className="overflow-x-auto bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
-                <table className="w-full border-collapse text-center min-w-[1200px]">
+            <h2 className="text-lg font-semibold mt-8 mb-2">Ders Programı Tablosu</h2>
+            <div className="mb-4 text-sm text-gray-600 dark:text-gray-400 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+                <p><strong>🎯 Akıllı Sürükle-Bırak Sistemi</strong></p>
+                <div className="mt-2 space-y-1">
+                    <p>• Dersleri mouse ile sürükleyip istediğiniz yere bırakın</p>
+                    <p>• <span className="inline-block w-3 h-3 bg-green-200 border border-green-400 rounded mr-1"></span> <strong>Yeşil:</strong> Güvenli taşıma (çakışma yok)</p>
+                    <p>• <span className="inline-block w-3 h-3 bg-blue-200 border border-blue-400 rounded mr-1"></span> <strong>Mavi:</strong> Yer değiştirme (çakışmasız takas)</p>
+                    <p>• <span className="inline-block w-3 h-3 bg-red-200 border border-red-400 rounded mr-1"></span> <strong>Kırmızı:</strong> Çakışma uyarısı ile detaylı bilgi</p>
+                    <p>• Çakışma olsa bile "Yine de taşı" seçeneği ile zorlama</p>
+                    <p>• <Icon icon="plus" className="w-3 h-3 inline" /> Manuel ders ekleme hala mümkün</p>
+                </div>
+            </div>
+            <div className="overflow-x-auto bg-white dark:bg-gray-800 p-3 rounded-lg shadow-md">
+                <table className="w-full border-collapse text-center min-w-[900px] text-sm">
                     <thead>
                         <tr className="bg-gray-100 dark:bg-gray-700">
-                            <th className="p-2 border dark:border-gray-300 dark:border-gray-600 w-32">Gün</th>
-                            <th className="p-2 border dark:border-gray-300 dark:border-gray-600 w-40">Saat</th>
+                            <th className="p-1 border dark:border-gray-300 dark:border-gray-600 w-20 text-xs">Gün</th>
+                            <th className="p-1 border dark:border-gray-300 dark:border-gray-600 w-24 text-xs">Saat</th>
                             {data.classes.map(c => (
-                                <th key={c.id} className="p-2 border dark:border-gray-300 dark:border-gray-600 font-semibold">{c.name}</th>
+                                <th key={c.id} className="p-1 border dark:border-gray-300 dark:border-gray-600 font-semibold text-xs min-w-[80px]">{c.name}</th>
                             ))}
                         </tr>
                     </thead>
@@ -1365,18 +1640,18 @@ const AssignmentsPage = () => {
                             <Fragment key={dayIndex}>
                                 {lessonTimes.map((lessonTime, hourIndex) => {
                                     return (
-                                        <tr key={`${dayIndex}-${hourIndex}`} className="h-20">
+                                        <tr key={`${dayIndex}-${hourIndex}`} className="h-12">
                                             {hourIndex === 0 && (
-                                                <td rowSpan={lessonTimes.length} className="p-2 border dark:border-gray-300 dark:border-gray-600 font-bold align-middle text-lg">
+                                                <td rowSpan={lessonTimes.length} className="p-1 border dark:border-gray-300 dark:border-gray-600 font-bold align-middle text-xs">
                                                     {DAYS_OF_WEEK[dayIndex]}
                                                 </td>
                                             )}
-                                            <td className="p-2 border dark:border-gray-300 dark:border-gray-600 font-mono text-sm whitespace-pre-wrap">
+                                            <td className="p-1 border dark:border-gray-300 dark:border-gray-600 font-mono text-xs whitespace-pre-wrap">
                                                  {lessonTime ? (
-                                                    <>
+                                                    <span className="text-xs leading-tight">
                                                         {lessonTime.start}<br/>-<br/>{lessonTime.end}
-                                                    </>
-                                                ) : `${hourIndex + 1}. Ders`}
+                                                    </span>
+                                                ) : <span className="text-xs">{hourIndex + 1}. Ders</span>}
                                             </td>
                                             {data.classes.map(c => {
                                                 const assignment = assignmentsByClassSlot.get(`${c.id}-${dayIndex}-${hourIndex}`);
@@ -1385,28 +1660,105 @@ const AssignmentsPage = () => {
                                                 const isWithinClassHours = hourIndex >= classStartHour && hourIndex <= classEndHour;
 
                                                 if (!isWithinClassHours) {
-                                                    return <td key={c.id} className="p-1 border dark:border-gray-300 dark:border-gray-600 align-middle bg-gray-50 dark:bg-gray-900/50" />;
+                                                    return <td key={c.id} className="p-0.5 border dark:border-gray-300 dark:border-gray-600 align-middle bg-gray-50 dark:bg-gray-900/50 h-12" />;
                                                 }
                                                 
                                                 if (assignment) {
                                                     const bgColor = getLessonColor(assignment.lessonName);
                                                     const textColor = getTextColorForBg(bgColor);
+                                                    const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
+                                                    const isDragged = draggedItem?.sourceClassId === c.id && draggedItem?.sourceDay === dayIndex && draggedItem?.sourceHour === hourIndex;
+                                                    
+                                                    // Çakışma kontrolü
+                                                    let hasConflict = false;
+                                                    if (isDraggedOver && draggedItem && draggedItem.assignmentId !== assignment.id) {
+                                                        const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
+                                                        if (draggedAssignment) {
+                                                            const tempAssignment: Omit<Assignment, 'id'> = {
+                                                                ...draggedAssignment,
+                                                                classId: c.id,
+                                                                day: dayIndex,
+                                                                hour: hourIndex
+                                                            };
+                                                            const otherAssignments = data.assignments.filter(a => 
+                                                                a.id !== draggedItem.assignmentId && a.id !== assignment.id
+                                                            );
+                                                            hasConflict = !!checkConflict(tempAssignment, otherAssignments);
+                                                        }
+                                                    }
+                                                    
                                                     return (
-                                                        <td key={c.id} className="p-1 border dark:border-gray-300 dark:border-gray-600 align-middle relative group" style={{ backgroundColor: bgColor, color: textColor }}>
-                                                            <div className="flex flex-col items-center justify-center text-center">
-                                                                <p className="font-bold">{assignment.lessonName}</p>
-                                                                <p className="text-xs">({getEntityName('teachers', assignment.teacherId)})</p>
+                                                        <td 
+                                                            key={c.id} 
+                                                            className={`p-1 border dark:border-gray-300 dark:border-gray-600 align-middle relative group cursor-move select-none h-12 transition-all ${
+                                                                isDraggedOver 
+                                                                    ? hasConflict 
+                                                                        ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
+                                                                        : 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/30'
+                                                                    : ''
+                                                            } ${isDragged ? 'opacity-50' : ''}`}
+                                                            style={{ backgroundColor: isDraggedOver ? undefined : bgColor, color: isDraggedOver ? undefined : textColor }}
+                                                            draggable={true}
+                                                            onDragStart={(e) => handleDragStart(e, assignment, c.id, dayIndex, hourIndex)}
+                                                            onDragOver={(e) => handleDragOver(e, c.id, dayIndex, hourIndex)}
+                                                            onDragLeave={handleDragLeave}
+                                                            onDrop={(e) => handleDrop(e, c.id, dayIndex, hourIndex)}
+                                                            onDragEnd={handleDragEnd}
+                                                        >
+                                                            <div className="flex flex-col items-center justify-center text-center text-xs">
+                                                                <p className="font-bold leading-tight">{assignment.lessonName}</p>
+                                                                <p className="text-xs opacity-80">({getEntityName('teachers', assignment.teacherId)})</p>
                                                             </div>
-                                                            <button onClick={() => handleDelete(c.id, dayIndex, hourIndex)} className="absolute top-1 right-1 text-black opacity-0 group-hover:opacity-100 transition-opacity p-1 bg-white/50 rounded-full hover:bg-white/80" aria-label="Sil">
-                                                                <Icon icon="trash" className="w-4 h-4" />
+                                                            <button 
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleDelete(c.id, dayIndex, hourIndex);
+                                                                }} 
+                                                                className="absolute top-0.5 right-0.5 text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 bg-white/80 rounded-full hover:bg-white" 
+                                                                aria-label="Sil"
+                                                            >
+                                                                <Icon icon="trash" className="w-3 h-3" />
                                                             </button>
                                                         </td>
                                                     );
                                                 } else {
+                                                    const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
+                                                    
+                                                    // Boş hücre için çakışma kontrolü
+                                                    let hasConflict = false;
+                                                    if (isDraggedOver && draggedItem) {
+                                                        const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
+                                                        if (draggedAssignment) {
+                                                            const tempAssignment: Omit<Assignment, 'id'> = {
+                                                                ...draggedAssignment,
+                                                                classId: c.id,
+                                                                day: dayIndex,
+                                                                hour: hourIndex
+                                                            };
+                                                            const otherAssignments = data.assignments.filter(a => a.id !== draggedItem.assignmentId);
+                                                            hasConflict = !!checkConflict(tempAssignment, otherAssignments);
+                                                        }
+                                                    }
+                                                    
                                                     return (
-                                                        <td key={c.id} className="p-1 border dark:border-gray-300 dark:border-gray-600 align-middle">
-                                                            <button onClick={() => handleOpenManualModal(dayIndex, hourIndex, c.id)} className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-md transition-colors">
-                                                                <Icon icon="plus" className="w-6 h-6"/>
+                                                        <td 
+                                                            key={c.id} 
+                                                            className={`p-1 border dark:border-gray-300 dark:border-gray-600 align-middle h-12 transition-all ${
+                                                                isDraggedOver 
+                                                                    ? hasConflict 
+                                                                        ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
+                                                                        : 'ring-2 ring-green-400 bg-green-50 dark:bg-green-900/30'
+                                                                    : ''
+                                                            }`}
+                                                            onDragOver={(e) => handleDragOver(e, c.id, dayIndex, hourIndex)}
+                                                            onDragLeave={handleDragLeave}
+                                                            onDrop={(e) => handleDrop(e, c.id, dayIndex, hourIndex)}
+                                                        >
+                                                            <button 
+                                                                onClick={() => handleOpenManualModal(dayIndex, hourIndex, c.id)} 
+                                                                className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-md transition-colors"
+                                                            >
+                                                                <Icon icon="plus" className="w-4 h-4"/>
                                                             </button>
                                                         </td>
                                                     );
