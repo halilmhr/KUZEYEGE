@@ -226,6 +226,8 @@ const Icon: FC<IconProps> = ({ icon, ...props }) => {
         download: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m14-7l-5-5-5 5m5-5v12" />,
         upload: <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m14-7l-5 5-5-5m5 5V3" />,
         zap: <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>,
+        'chevron-left': <path d="m15 18-6-6 6-6" />,
+        'chevron-right': <path d="m9 18 6-6-6-6" />,
     };
 
     return (
@@ -337,7 +339,12 @@ const Card: FC<{children: ReactNode, className?: string}> = ({ children, classNa
 );
 
 // --- LAYOUT COMPONENTS ---
-const Sidebar: FC<{ isMobileOpen: boolean; setMobileOpen: (open: boolean) => void }> = ({ isMobileOpen, setMobileOpen }) => {
+const Sidebar: FC<{ 
+    isMobileOpen: boolean; 
+    setMobileOpen: (open: boolean) => void;
+    isCollapsed: boolean;
+    setCollapsed: (collapsed: boolean) => void;
+}> = ({ isMobileOpen, setMobileOpen, isCollapsed, setCollapsed }) => {
     const navItems = [
         { path: '/', label: 'Anasayfa', icon: 'home' },
         { path: '/info', label: 'Genel Bilgiler', icon: 'info' },
@@ -353,23 +360,31 @@ const Sidebar: FC<{ isMobileOpen: boolean; setMobileOpen: (open: boolean) => voi
             to={path}
             onClick={onClick}
             className={({ isActive }) =>
-                `flex items-center gap-4 px-4 py-3 rounded-lg text-lg transition-colors ${
+                `flex items-center ${isCollapsed ? 'justify-center' : 'gap-4'} px-4 py-3 rounded-lg text-lg transition-colors ${
                     isActive
                         ? 'bg-blue-600 text-white font-semibold'
                         : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
                 }`
             }
+            title={isCollapsed ? label : undefined}
         >
             <Icon icon={icon} className="w-6 h-6" />
-            <span>{label}</span>
+            {!isCollapsed && <span>{label}</span>}
         </NavLink>
     );
 
     return (
         <>
-            <aside className={`fixed top-0 left-0 h-full bg-white dark:bg-gray-800 w-64 shadow-lg z-30 transform transition-transform duration-300 md:translate-x-0 ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-                <div className="p-6">
-                    <h1 className="text-xl font-bold text-blue-600 dark:text-blue-400">Ders Planlama</h1>
+            <aside className={`fixed top-0 left-0 h-full bg-white dark:bg-gray-800 ${isMobileOpen ? 'w-64' : isCollapsed ? 'w-16' : 'w-64'} shadow-lg z-30 transform transition-all duration-300 md:translate-x-0 ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+                <div className={`p-6 border-b border-gray-200 dark:border-gray-700 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
+                    {!isCollapsed && <h1 className="text-xl font-bold text-blue-600 dark:text-blue-400">Ders Planlama</h1>}
+                    <button
+                        onClick={() => setCollapsed(!isCollapsed)}
+                        className="hidden md:flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                        title={isCollapsed ? 'Menüyü Genişlet' : 'Menüyü Daralt'}
+                    >
+                        <Icon icon={isCollapsed ? 'chevron-right' : 'chevron-left'} className="w-4 h-4" />
+                    </button>
                 </div>
                 <nav className="p-4 flex flex-col gap-2">
                     {navItems.map(item => <NavItem key={item.path} {...item} onClick={() => setMobileOpen(false)} />)}
@@ -1612,14 +1627,20 @@ const ReportsPage = () => {
 // --- MAIN APP COMPONENT ---
 export default function App() {
   const [isMobileOpen, setMobileOpen] = useState(false);
+  const [isCollapsed, setCollapsed] = useState(false);
   
   return (
     <ThemeProvider>
         <DataProvider>
             <HashRouter>
                 <div className="flex h-screen text-gray-800 dark:text-gray-200">
-                    <Sidebar isMobileOpen={isMobileOpen} setMobileOpen={setMobileOpen} />
-                    <div className="flex-1 flex flex-col md:ml-64">
+                    <Sidebar 
+                        isMobileOpen={isMobileOpen} 
+                        setMobileOpen={setMobileOpen}
+                        isCollapsed={isCollapsed}
+                        setCollapsed={setCollapsed}
+                    />
+                    <div className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'md:ml-16' : 'md:ml-64'}`}>
                         <Header onMenuClick={() => setMobileOpen(true)} />
                         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
                             <AnimatePresence mode="wait">
