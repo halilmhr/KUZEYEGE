@@ -20,6 +20,8 @@ export interface SchoolInfo {
   director: string;
   year: string;
   daysInWeek: number;
+  lessonDuration: number; // Ders süresi (dakika)
+  breakDuration: number; // Teneffüs süresi (dakika)
   lessonTimes: LessonTime[]; // Varsayılan ders saatleri (tüm günler için)
   dailyLessonTimes?: { [dayIndex: number]: LessonTime[] }; // Güne özel ders saatleri (opsiyonel)
 }

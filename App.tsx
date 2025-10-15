@@ -58,6 +58,8 @@ const INITIAL_DATA: AppData = {
     director: "Ahmet Yılmaz",
     year: "2024-2025",
     daysInWeek: 5,
+    lessonDuration: 40,
+    breakDuration: 10,
     lessonTimes: generateDefaultTimes(8, "09:00", 40, 10),
   },
   teachers: [],
@@ -659,12 +661,72 @@ const LessonTimeEditor: FC<{
     setLessonTimes: React.Dispatch<React.SetStateAction<LessonTime[]>>;
 }> = ({ lessonTimes, setLessonTimes }) => {
 
-    const [autoGen, setAutoGen] = useState({ count: 8, start: '09:00', duration: 40, breakTime: 10 });
-
     const handleTimeChange = (index: number, field: 'start' | 'end', value: string) => {
         const newTimes = [...lessonTimes];
         newTimes[index] = { ...newTimes[index], [field]: value };
         setLessonTimes(newTimes);
+    };
+
+    // Otomatik düzenleme için özel handler - Enter tuşuna basıldığında çalışır
+    const handleTimeChangeWithAuto = (index: number, field: 'start' | 'end', value: string, event: React.KeyboardEvent) => {
+        if (event.key === 'Enter' && value && field === 'end') {
+            // Altındaki dersleri otomatik düzenle
+            const newTimes = [...lessonTimes];
+            newTimes[index] = { ...newTimes[index], [field]: value };
+            
+            // Bitiş saatinden itibaren altındaki dersleri düzenle
+            const endTime = parseTime(value);
+            if (endTime) {
+                // 10 dakika teneffüs ekleyerek bir sonraki dersin başlangıcını hesapla
+                let nextStartTime = addMinutes(endTime, 10);
+                
+                for (let i = index + 1; i < newTimes.length; i++) {
+                    const currentDuration = newTimes[i].start && newTimes[i].end ? 
+                        getTimeDifference(newTimes[i].start, newTimes[i].end) : 40; // Varsayılan 40 dakika
+                    
+                    newTimes[i].start = formatTime(nextStartTime);
+                    const nextEndTime = addMinutes(nextStartTime, currentDuration);
+                    newTimes[i].end = formatTime(nextEndTime);
+                    
+                    // Bir sonraki ders için 10 dakika teneffüs ekle
+                    nextStartTime = addMinutes(nextEndTime, 10);
+                }
+            }
+            
+            setLessonTimes(newTimes);
+        } else {
+            // Normal değişiklik
+            handleTimeChange(index, field, value);
+        }
+    };
+
+    // Yardımcı fonksiyonlar
+    const parseTime = (timeStr: string): Date | null => {
+        if (!timeStr) return null;
+        const [hours, minutes] = timeStr.split(':').map(Number);
+        if (isNaN(hours) || isNaN(minutes)) return null;
+        const date = new Date();
+        date.setHours(hours, minutes, 0, 0);
+        return date;
+    };
+
+    const formatTime = (date: Date): string => {
+        return date.toLocaleTimeString('tr-TR', { 
+            hour: '2-digit', 
+            minute: '2-digit', 
+            hour12: false 
+        });
+    };
+
+    const addMinutes = (date: Date, minutes: number): Date => {
+        return new Date(date.getTime() + minutes * 60000);
+    };
+
+    const getTimeDifference = (startTime: string, endTime: string): number => {
+        const start = parseTime(startTime);
+        const end = parseTime(endTime);
+        if (!start || !end) return 40; // Varsayılan
+        return Math.round((end.getTime() - start.getTime()) / 60000);
     };
 
     const addLessonTime = () => {
@@ -677,37 +739,27 @@ const LessonTimeEditor: FC<{
         }
     };
     
-    const handleAutoGen = () => {
-        const newTimes = generateDefaultTimes(autoGen.count, autoGen.start, autoGen.duration, autoGen.breakTime);
-        setLessonTimes(newTimes);
-    };
-
     return (
-      <div className="space-y-6">
-          <Card className="bg-gray-50 dark:bg-gray-700/50">
-             <h3 className="text-base font-semibold mb-3">Otomatik Zamanlama Oluşturucu</h3>
-             <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Ders saatlerini hızlıca oluşturmak için aşağıdaki formu kullanın. Oluşturulan zamanlamayı daha sonra manuel olarak düzenleyebilirsiniz.
-             </p>
-             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
-                <Input label="Ders Sayısı" type="number" min="1" value={autoGen.count} onChange={e => setAutoGen({...autoGen, count: parseInt(e.target.value) || 1})} />
-                <Input label="Başlangıç" type="time" value={autoGen.start} onChange={e => setAutoGen({...autoGen, start: e.target.value})} />
-                <Input label="Ders Süresi (dk)" type="number" min="1" value={autoGen.duration} onChange={e => setAutoGen({...autoGen, duration: parseInt(e.target.value) || 1})} />
-                <Input label="Teneffüs (dk)" type="number" min="0" value={autoGen.breakTime} onChange={e => setAutoGen({...autoGen, breakTime: parseInt(e.target.value) || 0})} />
-                <Button onClick={handleAutoGen} variant="secondary" className="w-full">
-                    <Icon icon="zap" className="w-5 h-5" /> Oluştur
-                </Button>
-             </div>
-          </Card>
-          
-          <div>
+        <div>
             <h3 className="text-base font-semibold mb-3">Ders Saatleri (Toplam: {lessonTimes.length} ders)</h3>
             <div className="space-y-3">
               {lessonTimes.map((time, index) => (
                 <div key={index} className="flex items-center gap-3 p-3 bg-gray-100 dark:bg-gray-700/50 rounded-lg">
                   <span className="font-bold w-12 text-center text-gray-600 dark:text-gray-400">{index + 1}.</span>
-                  <Input label="Başlangıç Saati" type="time" value={time.start} onChange={e => handleTimeChange(index, 'start', e.target.value)} />
-                  <Input label="Bitiş Saati" type="time" value={time.end} onChange={e => handleTimeChange(index, 'end', e.target.value)} />
+                  <Input 
+                    label="Başlangıç Saati" 
+                    type="time" 
+                    value={time.start} 
+                    onChange={e => handleTimeChange(index, 'start', e.target.value)}
+                    onKeyDown={e => handleTimeChangeWithAuto(index, 'start', e.currentTarget.value, e)}
+                  />
+                  <Input 
+                    label="Bitiş Saati" 
+                    type="time" 
+                    value={time.end} 
+                    onChange={e => handleTimeChange(index, 'end', e.target.value)}
+                    onKeyDown={e => handleTimeChangeWithAuto(index, 'end', e.currentTarget.value, e)}
+                  />
                   <IconButton icon="trash" label="Sil" onClick={() => removeLessonTime(index)} className="text-red-500 self-end mb-1" />
                 </div>
               ))}
@@ -716,7 +768,6 @@ const LessonTimeEditor: FC<{
                 <Icon icon="plus" className="w-5 h-5"/> Yeni Ders Saati Ekle
             </Button>
           </div>
-      </div>
     );
 };
 
@@ -758,7 +809,14 @@ const DailyLessonTimeEditor: FC<{
     };
     
     const copyFromDefault = (dayIndex: number) => {
-        setDayLessonTimes(dayIndex, [...schoolInfo.lessonTimes]);
+        // Okul ayarlarından varsayılan süreleri kullanarak yeni program oluştur
+        const lessonCount = schoolInfo.lessonTimes.length || 8;
+        const startTime = schoolInfo.lessonTimes.length > 0 ? schoolInfo.lessonTimes[0].start : "09:00";
+        const duration = schoolInfo.lessonDuration || 40;
+        const breakTime = schoolInfo.breakDuration || 10;
+        
+        const newTimes = generateDefaultTimes(lessonCount, startTime, duration, breakTime);
+        setDayLessonTimes(dayIndex, newTimes);
     };
     
     const hasCustomTimes = (dayIndex: number) => {
@@ -817,7 +875,7 @@ const DailyLessonTimeEditor: FC<{
                                 onClick={() => copyFromDefault(selectedDay)}
                                 variant="secondary"
                             >
-                                <Icon icon="copy" className="w-4 h-4"/> Varsayılan Saatlerden Kopyala
+                                <Icon icon="copy" className="w-4 h-4"/> Ders Programı Oluştur
                             </Button>
                         )}
                     </div>
@@ -830,8 +888,8 @@ const DailyLessonTimeEditor: FC<{
                     ) : (
                         <div className="text-center p-8 text-gray-500 dark:text-gray-400">
                             <Icon icon="calendar" className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                            <p className="mb-2">Bu gün varsayılan ders saatlerini kullanıyor</p>
-                            <p className="text-sm">Özel ders saatleri ayarlamak için "Varsayılan Saatlerden Kopyala" butonuna tıklayın</p>
+                            <p className="mb-2">Bu gün için henüz ders saatleri ayarlanmamış</p>
+                            <p className="text-sm">Ders programı oluşturmak için "Ders Programı Oluştur" butonuna tıklayın</p>
                         </div>
                     )}
                 </Card>
@@ -857,10 +915,6 @@ const GeneralInfoPage = () => {
     };
 
     const handleSave = () => {
-        if (schoolInfo.lessonTimes.some(t => !t.start || !t.end)) {
-            alert("Lütfen tüm ders saatlerinin başlangıç ve bitiş zamanlarını doldurun.");
-            return;
-        }
         setData(prev => ({...prev, schoolInfo }));
         alert("Genel bilgiler kaydedildi!");
     };
@@ -873,23 +927,14 @@ const GeneralInfoPage = () => {
                   <Input label="Müdür Adı" name="director" value={schoolInfo.director} onChange={handleInfoChange} />
                   <Input label="Eğitim Yılı" name="year" value={schoolInfo.year} onChange={handleInfoChange} />
                   <Input label="Haftalık Gün Sayısı" name="daysInWeek" type="number" min="1" max="7" value={schoolInfo.daysInWeek} onChange={handleInfoChange} />
+                  <Input label="Ders Süresi (dk)" name="lessonDuration" type="number" min="1" value={schoolInfo.lessonDuration || 40} onChange={handleInfoChange} />
+                  <Input label="Teneffüs Süresi (dk)" name="breakDuration" type="number" min="0" value={schoolInfo.breakDuration || 10} onChange={handleInfoChange} />
                 </div>
                 
                 <div className="pt-4 border-t dark:border-gray-600">
-                    <h3 className="text-lg font-semibold mb-4">Varsayılan Ders Saatleri</h3>
+                    <h3 className="text-lg font-semibold mb-4">Ders Saatleri</h3>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                        Tüm günler için geçerli olan varsayılan ders saatleri. Aşağıda günlere özel saatler belirleyebilirsiniz.
-                    </p>
-                    <LessonTimeEditor 
-                        lessonTimes={schoolInfo.lessonTimes} 
-                        setLessonTimes={newTimes => setSchoolInfo(prev => ({ ...prev, lessonTimes: newTimes }))} 
-                    />
-                </div>
-
-                <div className="pt-4 border-t dark:border-gray-600">
-                    <h3 className="text-lg font-semibold mb-4">Günlere Özel Ders Saatleri</h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                        İsteğe bağlı: Belirli günler için farklı ders saatleri ayarlayabilirsiniz. (Örn: Cuma günü erken bitiş)
+                        Her gün için ders saatlerini ayarlayın. Günleri seçerek farklı saatler belirleyebilirsiniz.
                     </p>
                     <DailyLessonTimeEditor 
                         schoolInfo={schoolInfo}
