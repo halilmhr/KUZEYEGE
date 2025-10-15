@@ -131,6 +131,22 @@ const useDayLessonTimes = (dayIndex: number) => {
     }, [data.schoolInfo, dayIndex]);
 };
 
+// Tüm günler için ders saatleri hook'u
+const useAllDayLessonTimes = () => {
+    const { data } = useData();
+    
+    return useMemo(() => {
+        const allDayTimes: { [dayIndex: number]: any[] } = {};
+        
+        for (let dayIndex = 0; dayIndex < data.schoolInfo.daysInWeek; dayIndex++) {
+            const dayLessonTimes = getLessonTimesForDay(data.schoolInfo, dayIndex);
+            allDayTimes[dayIndex] = dayLessonTimes || [];
+        }
+        
+        return allDayTimes;
+    }, [data.schoolInfo]);
+};
+
 
 // --- PROVIDERS ---
 const ThemeProvider: FC<{children: ReactNode}> = ({ children }) => {
@@ -479,8 +495,9 @@ interface AvailabilityGridProps {
     days: number;
     hours: number;
     lessonTimes: { index: number; start: string; end: string; label: string}[];
+    dayLessonTimes?: { [dayIndex: number]: any[] }; // Her günün ders saatleri
 }
-const AvailabilityGrid: FC<AvailabilityGridProps> = ({ availability, onAvailabilityChange, days, hours, lessonTimes }) => {
+const AvailabilityGrid: FC<AvailabilityGridProps> = ({ availability, onAvailabilityChange, days, hours, lessonTimes, dayLessonTimes = {} }) => {
     const cycleStatus = (currentStatus?: AvailabilityStatus): AvailabilityStatus => {
         const statuses = [AvailabilityStatus.AVAILABLE, AvailabilityStatus.PREFERRED, AvailabilityStatus.UNAVAILABLE];
         if (!currentStatus) return statuses[1];
@@ -505,8 +522,12 @@ const AvailabilityGrid: FC<AvailabilityGridProps> = ({ availability, onAvailabil
             newAvailability[dayIndex] = {};
         }
         
+        // Bu günün ders sayısını al - eğer dayLessonTimes yoksa hours'ı kullan
+        const dayLessons = dayLessonTimes?.[dayIndex] || [];
+        const dayHours = dayLessons.length > 0 ? dayLessons.length : hours;
+        
         // O gündeki tüm saatlerin mevcut durumunu kontrol et
-        const dayStatuses = Array.from({ length: hours }).map((_, hourIndex) => 
+        const dayStatuses = Array.from({ length: dayHours }).map((_, hourIndex) => 
             newAvailability[dayIndex][hourIndex] || AvailabilityStatus.AVAILABLE
         );
         
@@ -514,8 +535,8 @@ const AvailabilityGrid: FC<AvailabilityGridProps> = ({ availability, onAvailabil
         const mostCommonStatus = dayStatuses[0] || AvailabilityStatus.AVAILABLE;
         const nextStatus = cycleStatus(mostCommonStatus);
         
-        // Tüm saatleri yeni durumla güncelle
-        for (let hourIndex = 0; hourIndex < hours; hourIndex++) {
+        // Sadece bu günün ders saatlerini güncelle
+        for (let hourIndex = 0; hourIndex < dayHours; hourIndex++) {
             newAvailability[dayIndex][hourIndex] = nextStatus;
         }
         
@@ -526,25 +547,40 @@ const AvailabilityGrid: FC<AvailabilityGridProps> = ({ availability, onAvailabil
     const handleHourClick = (hourIndex: number) => {
         const newAvailability = { ...availability };
         
-        // O saatteki tüm günlerin mevcut durumunu kontrol et
-        const hourStatuses = Array.from({ length: days }).map((_, dayIndex) => 
-            newAvailability[dayIndex]?.[hourIndex] || AvailabilityStatus.AVAILABLE
-        );
+        // O saatteki sadece mevcut olan günlerin durumunu kontrol et
+        const hourStatuses = Array.from({ length: days })
+            .map((_, dayIndex) => {
+                const dayLessons = dayLessonTimes?.[dayIndex] || [];
+                const dayHours = dayLessons.length > 0 ? dayLessons.length : hours;
+                // Bu günde bu saat varsa durumunu al
+                return hourIndex < dayHours ? 
+                    (newAvailability[dayIndex]?.[hourIndex] || AvailabilityStatus.AVAILABLE) : null;
+            })
+            .filter(status => status !== null);
+        
+        if (hourStatuses.length === 0) return; // Hiçbir günde bu saat yoksa işlem yapma
         
         // En yaygın durumu bul veya ilk durumu al
         const mostCommonStatus = hourStatuses[0] || AvailabilityStatus.AVAILABLE;
         const nextStatus = cycleStatus(mostCommonStatus);
         
-        // Tüm günleri yeni durumla güncelle
+        // Sadece bu saati olan günleri güncelle
         for (let dayIndex = 0; dayIndex < days; dayIndex++) {
-            if (!newAvailability[dayIndex]) {
-                newAvailability[dayIndex] = {};
+            const dayLessons = dayLessonTimes?.[dayIndex] || [];
+            const dayHours = dayLessons.length > 0 ? dayLessons.length : hours;
+            
+            if (hourIndex < dayHours) {
+                if (!newAvailability[dayIndex]) {
+                    newAvailability[dayIndex] = {};
+                }
+                newAvailability[dayIndex][hourIndex] = nextStatus;
             }
-            newAvailability[dayIndex][hourIndex] = nextStatus;
         }
         
         onAvailabilityChange(newAvailability);
     };
+
+
 
     return (
         <div className="overflow-x-auto">
@@ -564,8 +600,7 @@ const AvailabilityGrid: FC<AvailabilityGridProps> = ({ availability, onAvailabil
             <table className="w-full border-collapse text-center text-sm">
                 <thead>
                     <tr>
-                        <th className="p-1 border dark:border-gray-600">
-                            <span className="text-xs text-gray-500 dark:text-gray-400">Saat</span>
+                        <th className="p-1 border dark:border-gray-600 w-8">
                         </th>
                         {Array.from({ length: days }).map((_, i) => (
                             <th 
@@ -580,16 +615,28 @@ const AvailabilityGrid: FC<AvailabilityGridProps> = ({ availability, onAvailabil
                     </tr>
                 </thead>
                 <tbody>
-                    {Array.from({ length: hours }).map((_, hourIndex) => (
+                    {Array.from({ length: Math.max(...Array.from({ length: days }, (_, dayIndex) => {
+                        const dayLessons = dayLessonTimes?.[dayIndex] || [];
+                        return dayLessons.length > 0 ? dayLessons.length : hours;
+                    })) }).map((_, hourIndex) => (
                         <tr key={hourIndex}>
                             <td 
-                                className="p-1 border dark:border-gray-600 font-mono text-xs whitespace-pre-wrap cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                                className="p-1 border dark:border-gray-600 w-8 text-xs text-center cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                                 onClick={() => handleHourClick(hourIndex)}
-                                title={`${lessonTimes[hourIndex]?.label || `${hourIndex + 1}. Ders`} saatinin tüm günlerini değiştirmek için tıklayın`}
+                                title={`${hourIndex + 1}. ders saatinin tüm günlerini değiştirmek için tıklayın`}
                             >
-                                {lessonTimes[hourIndex]?.label.replace(' - ', '\n-\n') || `${hourIndex + 1}. Ders`}
+                                {hourIndex + 1}
                             </td>
                             {Array.from({ length: days }).map((_, dayIndex) => {
+                                // Bu günün ders saatleri - eğer dayLessonTimes yoksa hours'ı kullan
+                                const dayLessons = dayLessonTimes?.[dayIndex] || [];
+                                const dayHours = dayLessons.length > 0 ? dayLessons.length : hours;
+                                
+                                // Eğer bu saat dilimi bu günde yoksa boş hücre göster
+                                if (hourIndex >= dayHours) {
+                                    return <td key={dayIndex} className="p-1 border bg-gray-100 dark:bg-gray-700"></td>;
+                                }
+                                
                                 const status = availability?.[dayIndex]?.[hourIndex] || AvailabilityStatus.AVAILABLE;
                                 return (
                                     <td
@@ -964,6 +1011,20 @@ interface CrudPageProps<T extends { id: string; name: string; availability: Avai
 
 const CrudPage = <T extends { id: string; name: string; availability: Availability; }>({ title, itemType, formFields, createItem, displayInfo }: CrudPageProps<T>) => {
     const { data, setData } = useData();
+    const dayLessonTimes = useAllDayLessonTimes();
+    
+    // Tüm günlerdeki maksimum ders sayısını bul
+    const maxHours = Math.max(...Array.from({ length: data.schoolInfo.daysInWeek }, (_, dayIndex) => 
+        dayLessonTimes[dayIndex]?.length || 0
+    ), data.schoolInfo.lessonTimes.length);
+    
+    // Uygunluk tablosu için basit etiketler oluştur
+    const availabilityLessonTimes = Array.from({ length: maxHours }, (_, index) => ({
+        index,
+        start: '',
+        end: '',
+        label: `${index + 1}. Ders`
+    }));
     const lessonTimes = useLessonTimes();
     const items = data[itemType] as T[];
     
@@ -1057,8 +1118,9 @@ const CrudPage = <T extends { id: string; name: string; availability: Availabili
                         availability={formData.availability || {}}
                         onAvailabilityChange={(av) => handleFormChange({ availability: av } as Partial<T>)}
                         days={data.schoolInfo.daysInWeek}
-                        hours={data.schoolInfo.lessonTimes.length}
-                        lessonTimes={lessonTimes}
+                        hours={maxHours}
+                        lessonTimes={availabilityLessonTimes}
+                        dayLessonTimes={dayLessonTimes}
                     />
                     <div className="flex justify-end gap-4 pt-4">
                         <Button variant="secondary" onClick={handleCloseModal}>İptal</Button>
