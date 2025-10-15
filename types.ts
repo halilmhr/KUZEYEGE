@@ -20,7 +20,8 @@ export interface SchoolInfo {
   director: string;
   year: string;
   daysInWeek: number;
-  lessonTimes: LessonTime[];
+  lessonTimes: LessonTime[]; // Varsayılan ders saatleri (tüm günler için)
+  dailyLessonTimes?: { [dayIndex: number]: LessonTime[] }; // Güne özel ders saatleri (opsiyonel)
 }
 
 export interface Teacher {

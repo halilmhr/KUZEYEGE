@@ -82,6 +82,16 @@ const DataContext = createContext<{ data: AppData; setData: React.Dispatch<React
 const useData = () => useContext(DataContext);
 const useTheme = () => useContext(ThemeContext);
 
+// Belirli bir gün için ders saatlerini getir
+const getLessonTimesForDay = (schoolInfo: any, dayIndex: number) => {
+    // Eğer o gün için özel ders saatleri varsa onu kullan
+    if (schoolInfo.dailyLessonTimes && schoolInfo.dailyLessonTimes[dayIndex]) {
+        return schoolInfo.dailyLessonTimes[dayIndex];
+    }
+    // Yoksa varsayılan ders saatlerini kullan
+    return schoolInfo.lessonTimes || [];
+};
+
 const useLessonTimes = () => {
     const { data } = useData();
     const { lessonTimes } = data.schoolInfo;
@@ -98,6 +108,25 @@ const useLessonTimes = () => {
             label: `${time.start} - ${time.end}`
         }));
     }, [lessonTimes]);
+};
+
+// Güne özel ders saatleri hook'u
+const useDayLessonTimes = (dayIndex: number) => {
+    const { data } = useData();
+    
+    return useMemo(() => {
+        const dayLessonTimes = getLessonTimesForDay(data.schoolInfo, dayIndex);
+        if (!dayLessonTimes || dayLessonTimes.length === 0) {
+            return [];
+        }
+        
+        return dayLessonTimes.map((time, index) => ({
+            index: index,
+            start: time.start,
+            end: time.end,
+            label: `${time.start} - ${time.end}`
+        }));
+    }, [data.schoolInfo, dayIndex]);
 };
 
 
@@ -691,6 +720,132 @@ const LessonTimeEditor: FC<{
     );
 };
 
+// Günlük ders saatleri editörü
+const DailyLessonTimeEditor: FC<{
+    schoolInfo: any;
+    setSchoolInfo: React.Dispatch<React.SetStateAction<any>>;
+}> = ({ schoolInfo, setSchoolInfo }) => {
+    const DAYS_OF_WEEK = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+    
+    const [selectedDay, setSelectedDay] = useState<number | null>(null);
+    
+    const getDayLessonTimes = (dayIndex: number): LessonTime[] => {
+        if (schoolInfo.dailyLessonTimes && schoolInfo.dailyLessonTimes[dayIndex]) {
+            return schoolInfo.dailyLessonTimes[dayIndex];
+        }
+        return [...schoolInfo.lessonTimes]; // Varsayılan saatlerin kopyası
+    };
+    
+    const setDayLessonTimes = (dayIndex: number, times: LessonTime[]) => {
+        setSchoolInfo(prev => ({
+            ...prev,
+            dailyLessonTimes: {
+                ...prev.dailyLessonTimes,
+                [dayIndex]: times
+            }
+        }));
+    };
+    
+    const removeDayLessonTimes = (dayIndex: number) => {
+        if (schoolInfo.dailyLessonTimes && schoolInfo.dailyLessonTimes[dayIndex]) {
+            const newDailyTimes = { ...schoolInfo.dailyLessonTimes };
+            delete newDailyTimes[dayIndex];
+            setSchoolInfo(prev => ({
+                ...prev,
+                dailyLessonTimes: newDailyTimes
+            }));
+        }
+    };
+    
+    const copyFromDefault = (dayIndex: number) => {
+        setDayLessonTimes(dayIndex, [...schoolInfo.lessonTimes]);
+    };
+    
+    const hasCustomTimes = (dayIndex: number) => {
+        return schoolInfo.dailyLessonTimes && schoolInfo.dailyLessonTimes[dayIndex];
+    };
+    
+    return (
+        <div className="space-y-4">
+            {/* Günler listesi */}
+            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                {Array.from({ length: schoolInfo.daysInWeek }, (_, dayIndex) => (
+                    <div key={dayIndex} className="space-y-2">
+                        <button
+                            onClick={() => setSelectedDay(selectedDay === dayIndex ? null : dayIndex)}
+                            className={`w-full p-3 rounded-lg border-2 transition-all ${
+                                hasCustomTimes(dayIndex)
+                                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
+                                    : selectedDay === dayIndex
+                                        ? 'border-gray-400 bg-gray-100 dark:bg-gray-700'
+                                        : 'border-gray-300 hover:border-gray-400 dark:border-gray-600'
+                            }`}
+                        >
+                            <div className="text-sm font-medium">{DAYS_OF_WEEK[dayIndex]}</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                {hasCustomTimes(dayIndex) ? 'Özel' : 'Varsayılan'}
+                            </div>
+                        </button>
+                        
+                        {hasCustomTimes(dayIndex) && (
+                            <Button
+                                variant="danger"
+                                onClick={() => {
+                                    if (window.confirm(`${DAYS_OF_WEEK[dayIndex]} günü için özel ders saatlerini kaldırmak istediğinizden emin misiniz?`)) {
+                                        removeDayLessonTimes(dayIndex);
+                                        if (selectedDay === dayIndex) setSelectedDay(null);
+                                    }
+                                }}
+                                className="w-full text-xs py-1"
+                            >
+                                Özel Saatleri Kaldır
+                            </Button>
+                        )}
+                    </div>
+                ))}
+            </div>
+            
+            {/* Seçili gün düzenleyicisi */}
+            {selectedDay !== null && (
+                <Card className="mt-6">
+                    <div className="flex items-center justify-between mb-4">
+                        <h4 className="text-lg font-semibold">
+                            {DAYS_OF_WEEK[selectedDay]} Günü Ders Saatleri
+                        </h4>
+                        {!hasCustomTimes(selectedDay) && (
+                            <Button
+                                onClick={() => copyFromDefault(selectedDay)}
+                                variant="secondary"
+                            >
+                                <Icon icon="copy" className="w-4 h-4"/> Varsayılan Saatlerden Kopyala
+                            </Button>
+                        )}
+                    </div>
+                    
+                    {hasCustomTimes(selectedDay) ? (
+                        <LessonTimeEditor
+                            lessonTimes={getDayLessonTimes(selectedDay)}
+                            setLessonTimes={(times) => setDayLessonTimes(selectedDay, times)}
+                        />
+                    ) : (
+                        <div className="text-center p-8 text-gray-500 dark:text-gray-400">
+                            <Icon icon="calendar" className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                            <p className="mb-2">Bu gün varsayılan ders saatlerini kullanıyor</p>
+                            <p className="text-sm">Özel ders saatleri ayarlamak için "Varsayılan Saatlerden Kopyala" butonuna tıklayın</p>
+                        </div>
+                    )}
+                </Card>
+            )}
+            
+            {selectedDay === null && (
+                <div className="text-center p-6 text-gray-500 dark:text-gray-400">
+                    <Icon icon="clock" className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                    <p>Düzenlemek istediğiniz günü seçin</p>
+                </div>
+            )}
+        </div>
+    );
+};
 
 const GeneralInfoPage = () => {
     const { data, setData } = useData();
@@ -721,9 +876,24 @@ const GeneralInfoPage = () => {
                 </div>
                 
                 <div className="pt-4 border-t dark:border-gray-600">
+                    <h3 className="text-lg font-semibold mb-4">Varsayılan Ders Saatleri</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                        Tüm günler için geçerli olan varsayılan ders saatleri. Aşağıda günlere özel saatler belirleyebilirsiniz.
+                    </p>
                     <LessonTimeEditor 
                         lessonTimes={schoolInfo.lessonTimes} 
                         setLessonTimes={newTimes => setSchoolInfo(prev => ({ ...prev, lessonTimes: newTimes }))} 
+                    />
+                </div>
+
+                <div className="pt-4 border-t dark:border-gray-600">
+                    <h3 className="text-lg font-semibold mb-4">Günlere Özel Ders Saatleri</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                        İsteğe bağlı: Belirli günler için farklı ders saatleri ayarlayabilirsiniz. (Örn: Cuma günü erken bitiş)
+                    </p>
+                    <DailyLessonTimeEditor 
+                        schoolInfo={schoolInfo}
+                        setSchoolInfo={setSchoolInfo}
                     />
                 </div>
 
