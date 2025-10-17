@@ -1270,8 +1270,6 @@ const ClassesPage = () => {
             name: '', 
             level: '', 
             curriculum: [], 
-            startHour: 0,
-            endHour: data.schoolInfo.lessonTimes.length > 0 ? data.schoolInfo.lessonTimes.length - 1 : 0,
             ...item 
         } as ClassData)}
         formFields={(item, onChange) => {
@@ -1279,33 +1277,6 @@ const ClassesPage = () => {
                 <>
                     <Input label="Sınıf Adı" value={item.name || ''} onChange={e => onChange({ name: e.target.value })} />
                     <Input label="Seviye" value={item.level || ''} onChange={e => onChange({ level: e.target.value })} />
-                    <div className="grid grid-cols-2 gap-4 pt-4">
-                        <Select
-                            label="Başlangıç Saati"
-                            value={(item as ClassData).startHour ?? 0}
-                            onChange={e => {
-                                const newStartHour = parseInt(e.target.value);
-                                const currentEndHour = (item as ClassData).endHour ?? data.schoolInfo.lessonTimes.length - 1;
-                                onChange({ 
-                                    startHour: newStartHour,
-                                    endHour: newStartHour > currentEndHour ? newStartHour : currentEndHour
-                                } as Partial<ClassData>);
-                            }}
-                        >
-                            {lessonTimes.map(time => (
-                                <option key={time.index} value={time.index}>{time.label}</option>
-                            ))}
-                        </Select>
-                        <Select
-                            label="Bitiş Saati"
-                            value={(item as ClassData).endHour ?? data.schoolInfo.lessonTimes.length - 1}
-                            onChange={e => onChange({ endHour: parseInt(e.target.value) } as Partial<ClassData>)}
-                        >
-                            {lessonTimes.filter(time => time.index >= ((item as ClassData).startHour ?? 0)).map(time => (
-                                <option key={time.index} value={time.index}>{time.label}</option>
-                            ))}
-                        </Select>
-                    </div>
                     <CurriculumManager 
                         curriculum={(item as ClassData).curriculum || []} 
                         onChange={curriculum => onChange({ curriculum } as Partial<ClassData>)}
@@ -1348,12 +1319,13 @@ const ClassroomsPage = () => (
 const AssignmentsPage = () => {
     const { data, setData } = useData();
     const lessonTimes = useLessonTimes();
+    const dayLessonTimes = useAllDayLessonTimes();
     const [isManualAssignModalOpen, setManualAssignModalOpen] = useState(false);
     const [selectedSlot, setSelectedSlot] = useState<{ day: number; hour: number } | null>(null);
     const [assignmentForm, setAssignmentForm] = useState<Partial<Omit<Assignment, 'id'>>>({});
 
     const [isResultModalOpen, setResultModalOpen] = useState(false);
-    const [assignmentResult, setAssignmentResult] = useState<{ assigned: Assignment[], unassigned: any[] } | null>(null);
+    const [assignmentResult, setAssignmentResult] = useState<{ assigned: Assignment[], unassigned: any[], attemptCount?: number } | null>(null);
     const [clearExisting, setClearExisting] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
 
@@ -1867,220 +1839,405 @@ const AssignmentsPage = () => {
             alert("Sınıfların müfredatlarında atanacak ders bulunmuyor. Lütfen 'Sınıflar' sayfasından ders gereksinimlerini ekleyin.");
             return;
         }
-        
+
         setIsLoading(true);
+        console.log('🚀 Otomatik atama başlıyor...');
+
         setTimeout(() => {
-            const { schoolInfo, teachers, classes, classrooms, assignments } = data;
-    
-            const requirements = allRequirements;
+            try {
+                const { schoolInfo, teachers, classes, classrooms, assignments } = data;
+                const requirements = allRequirements;
 
-            const getAvailabilityStatus = (entity: Teacher | ClassData | Classroom, day: number, hour: number) =>
-                entity.availability?.[day]?.[hour] || AvailabilityStatus.AVAILABLE;
-            
-            const getScore = (status: AvailabilityStatus) => {
-                if (status === AvailabilityStatus.UNAVAILABLE) return -Infinity;
-                if (status === AvailabilityStatus.PREFERRED) return 2;
-                return 1;
-            };
+                const getAvailabilityStatus = (entity: Teacher | ClassData | Classroom, day: number, hour: number) =>
+                    entity.availability?.[day]?.[hour] || AvailabilityStatus.AVAILABLE;
 
-            const existingAssignments = clearExisting ? [] : [...assignments];
-            const occupiedSlots = new Set(existingAssignments.flatMap(a => [
-                `t-${a.teacherId}-${a.day}-${a.hour}`,
-                `c-${a.classId}-${a.day}-${a.hour}`,
-                a.classroomId ? `r-${a.classroomId}-${a.day}-${a.hour}`: null,
-            ].filter(Boolean) as string[]));
+                const getScore = (status: AvailabilityStatus) => {
+                    if (status === AvailabilityStatus.UNAVAILABLE) return -Infinity;
+                    if (status === AvailabilityStatus.PREFERRED) return 2;
+                    return 1;
+                };
 
-            const scoredSlotsByReq = requirements.map((req, index) => {
-                const possibleSlots: { day: number, hour: number, classroomId?: string, score: number }[] = [];
-                const teacher = teachers.find(t => t.id === req.teacherId);
-                const classData = classes.find(c => c.id === req.classId);
+                const shuffleArray = <T,>(source: T[]): T[] => {
+                    const arr = [...source];
+                    for (let i = arr.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [arr[i], arr[j]] = [arr[j], arr[i]];
+                    }
+                    return arr;
+                };
 
-                if (!teacher || !classData) return { req, index, possibleSlots };
+                const classMap = new Map<string, ClassData>(classes.map(cls => [cls.id, cls] as [string, ClassData]));
+                const teacherMap = new Map<string, Teacher>(teachers.map(t => [t.id, t] as [string, Teacher]));
 
-                const classStartHour = classData.startHour ?? 0;
-                const classEndHour = classData.endHour ?? (schoolInfo.lessonTimes.length > 0 ? schoolInfo.lessonTimes.length - 1 : 0);
+                const existingAssignments = clearExisting ? [] : [...assignments];
+                const occupiedSlots = new Set(existingAssignments.flatMap(a => [
+                    `t-${a.teacherId}-${a.day}-${a.hour}`,
+                    `c-${a.classId}-${a.day}-${a.hour}`,
+                    a.classroomId ? `r-${a.classroomId}-${a.day}-${a.hour}` : null,
+                ].filter(Boolean) as string[]));
 
-                for (let day = 0; day < schoolInfo.daysInWeek; day++) {
-                    for (let hour = classStartHour; hour <= classEndHour; hour++) {
-                        const teacherStatus = getAvailabilityStatus(teacher, day, hour);
-                        const classStatus = getAvailabilityStatus(classData, day, hour);
+                const scoredRequirements = requirements.map((req, index) => {
+                    const possibleSlots: { day: number; hour: number; classroomId?: string; score: number }[] = [];
+                    const teacher = teacherMap.get(req.teacherId);
+                    const classData = classMap.get(req.classId);
 
-                        if (teacherStatus === AvailabilityStatus.UNAVAILABLE || classStatus === AvailabilityStatus.UNAVAILABLE) {
-                            continue;
-                        }
-                        
-                        if (occupiedSlots.has(`t-${req.teacherId}-${day}-${hour}`) || occupiedSlots.has(`c-${req.classId}-${day}-${hour}`)) {
-                            continue;
-                        }
+                    if (!teacher || !classData) {
+                        return { req, index, possibleSlots };
+                    }
 
-                        let baseScore = getScore(teacherStatus) + getScore(classStatus);
+                    let classStartHour = 0;
+                    let classEndHour = 0;
 
-                        // Arka arkaya ders kuralı için akıllı scoring
-                        const curriculumItem = classData.curriculum?.find(item => item.lessonName === req.lessonName);
-                        if (curriculumItem) {
-                            const totalHours = curriculumItem.hours;
-                            
-                            // Bu sınıfın aynı dersten mevcut atamalarını kontrol et
-                            const existingSameLessons = existingAssignments
-                                .filter(a => a.classId === req.classId && a.lessonName === req.lessonName);
-                            
-                            if (totalHours >= 2 && totalHours % 2 === 0) {
-                                // Çift saatlik dersler için ikişerli bonus
-                                const hasAdjacentLesson = existingSameLessons.some(existingLesson => {
-                                    if (existingLesson.day === day) {
-                                        const hourDiff = Math.abs(existingLesson.hour - hour);
-                                        return hourDiff === 1;
-                                    }
-                                    return false;
-                                });
-                                
-                                if (hasAdjacentLesson) {
-                                    baseScore += 15; // Çift saatler için büyük bonus
-                                }
-                            } else if (totalHours >= 2) {
-                                // 3+ saatlik dersler için: SADECE ilk 2 ders arka arkaya olsun
-                                const sortedExisting = existingSameLessons
-                                    .map(lesson => ({ ...lesson, datetime: lesson.day * 24 + lesson.hour }))
-                                    .sort((a, b) => a.datetime - b.datetime);
-                                
-                                if (sortedExisting.length === 0) {
-                                    // İlk ders, normal puan
-                                    baseScore += 3;
-                                } else if (sortedExisting.length === 1) {
-                                    // İkinci ders - ilkinin yanında olmalı
-                                    const firstLesson = sortedExisting[0];
-                                    if (firstLesson.day === day && Math.abs(firstLesson.hour - hour) === 1) {
-                                        baseScore += 25; // İkinci ders arka arkaya gelirse çok büyük bonus
-                                    } else {
-                                        baseScore -= 15; // İkinci ders arka arkaya gelmezse büyük penalty
-                                    }
-                                } else if (sortedExisting.length >= 2) {
-                                    // 3. ve sonraki dersler - arka arkaya GELMEMELİ
-                                    const lastTwoLessons = sortedExisting.slice(-2);
-                                    const isConsecutiveWithLast = lastTwoLessons.some(lesson => 
-                                        lesson.day === day && Math.abs(lesson.hour - hour) === 1
-                                    );
-                                    
-                                    if (isConsecutiveWithLast) {
-                                        baseScore -= 20; // 3. ders arka arkaya gelirse büyük penalty
-                                    } else {
-                                        baseScore += 5; // 3. ders arka arkaya gelmezse bonus
-                                    }
+                    if (classData.availability) {
+                        let minHour = Infinity;
+                        let maxHour = -1;
+                        for (let day = 0; day < schoolInfo.daysInWeek; day++) {
+                            const dayLessons = dayLessonTimes[day] || [];
+                            for (let hour = 0; hour < dayLessons.length; hour++) {
+                                const status = getAvailabilityStatus(classData, day, hour);
+                                if (status !== AvailabilityStatus.UNAVAILABLE) {
+                                    minHour = Math.min(minHour, hour);
+                                    maxHour = Math.max(maxHour, hour);
                                 }
                             }
                         }
+                        if (maxHour >= 0) {
+                            classStartHour = minHour;
+                            classEndHour = maxHour;
+                        }
+                    } else {
+                        const allDayLessonCounts = Array.from({ length: schoolInfo.daysInWeek }, (_, dayIdx) =>
+                            (dayLessonTimes[dayIdx] || []).length
+                        );
+                        const maxLessonsAnyDay = Math.max(...allDayLessonCounts, 0);
+                        classStartHour = classData.startHour ?? 0;
+                        classEndHour = classData.endHour ?? (maxLessonsAnyDay > 0 ? maxLessonsAnyDay - 1 : 7);
+                    }
 
-                        if (classrooms.length === 0) {
-                            possibleSlots.push({ day, hour, classroomId: undefined, score: baseScore });
-                        } else {
-                            for (const classroom of classrooms) {
-                                const classroomStatus = getAvailabilityStatus(classroom, day, hour);
-                                if (classroomStatus !== AvailabilityStatus.UNAVAILABLE && !occupiedSlots.has(`r-${classroom.id}-${day}-${hour}`)) {
+                    for (let day = 0; day < schoolInfo.daysInWeek; day++) {
+                        const dayLessons = dayLessonTimes[day] || [];
+                        const maxHourForDay = dayLessons.length - 1;
+                        const dayClassStartHour = Math.max(classStartHour, 0);
+                        const dayClassEndHour = Math.min(classEndHour, maxHourForDay);
+
+                        if (maxHourForDay < 0 || dayClassStartHour > dayClassEndHour) {
+                            continue;
+                        }
+
+                        let classHasAvailability = false;
+                        for (let hour = dayClassStartHour; hour <= dayClassEndHour; hour++) {
+                            if (getAvailabilityStatus(classData, day, hour) !== AvailabilityStatus.UNAVAILABLE) {
+                                classHasAvailability = true;
+                                break;
+                            }
+                        }
+                        if (!classHasAvailability) {
+                            continue;
+                        }
+
+                        for (let hour = dayClassStartHour; hour <= dayClassEndHour; hour++) {
+                            const teacherStatus = getAvailabilityStatus(teacher, day, hour);
+                            const classStatus = getAvailabilityStatus(classData, day, hour);
+
+                            if (teacherStatus === AvailabilityStatus.UNAVAILABLE || classStatus === AvailabilityStatus.UNAVAILABLE) {
+                                continue;
+                            }
+
+                            if (occupiedSlots.has(`t-${req.teacherId}-${day}-${hour}`) || occupiedSlots.has(`c-${req.classId}-${day}-${hour}`)) {
+                                continue;
+                            }
+
+                            const baseScore = getScore(teacherStatus) + getScore(classStatus);
+                            if (baseScore === -Infinity) {
+                                continue;
+                            }
+
+                            if (classrooms.length === 0) {
+                                possibleSlots.push({ day, hour, score: baseScore });
+                            } else {
+                                for (const classroom of classrooms) {
+                                    const classroomStatus = getAvailabilityStatus(classroom, day, hour);
+                                    if (classroomStatus === AvailabilityStatus.UNAVAILABLE) {
+                                        continue;
+                                    }
+                                    if (occupiedSlots.has(`r-${classroom.id}-${day}-${hour}`)) {
+                                        continue;
+                                    }
                                     const finalScore = baseScore + getScore(classroomStatus);
+                                    if (finalScore === -Infinity) {
+                                        continue;
+                                    }
                                     possibleSlots.push({ day, hour, classroomId: classroom.id, score: finalScore });
                                 }
                             }
                         }
                     }
+
+                    return { req, index, possibleSlots };
+                });
+
+                const lessonGroupMap = new Map<string, typeof scoredRequirements>();
+                for (const item of scoredRequirements) {
+                    const key = `${item.req.classId}::${item.req.lessonName}::${item.req.teacherId}`;
+                    if (!lessonGroupMap.has(key)) {
+                        lessonGroupMap.set(key, []);
+                    }
+                    lessonGroupMap.get(key)!.push(item);
                 }
-                return { req, index, possibleSlots };
-            });
 
-            scoredSlotsByReq.sort((a, b) => a.possibleSlots.length - b.possibleSlots.length);
-            
-            const newAssignments: Assignment[] = [];
-            const unassigned: any[] = [];
-            const newOccupiedSlots = new Set(occupiedSlots);
+                type PlacementSlot = { day: number; hour: number; classroomId?: string; score: number };
+                type PlacementCandidate = { slots: PlacementSlot[]; totalScore: number };
+                type LessonGroupEntry = {
+                    key: string;
+                    classId: string;
+                    teacherId: string;
+                    lessonName: string;
+                    items: typeof scoredRequirements;
+                    blockSize: number;
+                    candidates: PlacementCandidate[];
+                    randomPriority: number;
+                };
 
-            // Kesin çözüm: 3+ saatlik dersler için dinamik slot filtreleme
-            for (const item of scoredSlotsByReq) {
-                const classData = classes.find(c => c.id === item.req.classId);
-                const curriculumItem = classData?.curriculum?.find(ci => ci.lessonName === item.req.lessonName);
-                const totalHours = curriculumItem?.hours || 1;
-                
-                // Bu sınıfın bu dersten kaç tane atanmış?
-                const sameClassLessonAssignments = newAssignments.filter(a => 
-                    a.classId === item.req.classId && a.lessonName === item.req.lessonName
-                );
-                const assignedCount = sameClassLessonAssignments.length;
-                
-                // Slotları filtrele ve sırala
-                let validSlots = [...item.possibleSlots];
-                
-                // 3+ saatlik dersler için özel filtreleme
-                if (totalHours >= 3) {
-                    if (assignedCount === 0) {
-                        // İlk ders: Normal yerleştir
-                        // Hiçbir kısıtlama yok
-                    } else if (assignedCount === 1) {
-                        // İkinci ders: İki seçenek sun
-                        // 1) İlk dersin yanına koy (arka arkaya olsun)
-                        // 2) Veya uzağa koy (arka arkaya olmasın)
-                        // En yüksek skorlu olanı seçsin
-                        // Filtreleme yapma, scoring'e bırak
-                    } else if (assignedCount >= 2) {
-                        // 3. ve sonraki dersler için kontrol
-                        // Eğer zaten 2 ders arka arkaya ise, 3. ders arka arkaya olmamalı
-                        // Eğer 2 ders arka arkaya değilse, 3. ders birinin yanına konabilir (2 ders arka arkaya olsun diye)
-                        
-                        // Mevcut derslerden herhangi 2'si arka arkaya mı?
-                        let hasConsecutivePair = false;
-                        for (let i = 0; i < sameClassLessonAssignments.length; i++) {
-                            for (let j = i + 1; j < sameClassLessonAssignments.length; j++) {
-                                const lesson1 = sameClassLessonAssignments[i];
-                                const lesson2 = sameClassLessonAssignments[j];
-                                if (lesson1.day === lesson2.day && Math.abs(lesson1.hour - lesson2.hour) === 1) {
-                                    hasConsecutivePair = true;
-                                    break;
+                const gatherSlotOptions = (items: typeof scoredRequirements, day: number, hour: number): PlacementSlot[] => {
+                    const slotMap = new Map<string, PlacementSlot>();
+                    for (const item of items) {
+                        for (const slot of item.possibleSlots) {
+                            if (slot.day !== day || slot.hour !== hour) {
+                                continue;
+                            }
+                            const key = slot.classroomId ?? '::none';
+                            const existing = slotMap.get(key);
+                            if (!existing || existing.score < slot.score) {
+                                slotMap.set(key, { day: slot.day, hour: slot.hour, classroomId: slot.classroomId, score: slot.score });
+                            }
+                        }
+                    }
+                    const result = Array.from(slotMap.values());
+                    result.sort((a, b) => b.score - a.score);
+                    return result;
+                };
+
+                const buildCandidatesForGroup = (entryItems: typeof scoredRequirements): PlacementCandidate[] => {
+                    const blockSize = entryItems.length;
+                    if (blockSize === 0) {
+                        return [];
+                    }
+
+                    const candidates: PlacementCandidate[] = [];
+
+                    if (blockSize === 1) {
+                        const slotSet = new Map<string, PlacementSlot>();
+                        for (const item of entryItems) {
+                            for (const slot of item.possibleSlots) {
+                                const key = `${slot.day}-${slot.hour}-${slot.classroomId ?? '::none'}`;
+                                if (!slotSet.has(key) || slotSet.get(key)!.score < slot.score) {
+                                    slotSet.set(key, { day: slot.day, hour: slot.hour, classroomId: slot.classroomId, score: slot.score });
                                 }
                             }
-                            if (hasConsecutivePair) break;
                         }
-                        
-                        if (hasConsecutivePair) {
-                            // Zaten 2 ders arka arkaya var, 3. ders arka arkaya OLMAMALI
-                            validSlots = validSlots.filter(slot => {
-                                return !sameClassLessonAssignments.some(existing => 
-                                    existing.day === slot.day &&
-                                    Math.abs(existing.hour - slot.hour) === 1
-                                );
-                            });
+                        const uniqueSlots = Array.from(slotSet.values());
+                        uniqueSlots.sort((a, b) => b.score - a.score);
+                        for (const slot of uniqueSlots) {
+                            candidates.push({ slots: [slot], totalScore: slot.score });
                         }
-                        // Eğer arka arkaya ders yoksa, 3. ders herhangi birine bitişik konabilir
+                        return candidates;
                     }
-                }
-                
-                // En iyi skorlu geçerli slotu bul
-                validSlots.sort((a, b) => b.score - a.score);
-                
-                let placed = false;
-                for (const slot of validSlots) {
-                    const teacherKey = `t-${item.req.teacherId}-${slot.day}-${slot.hour}`;
-                    const classKey = `c-${item.req.classId}-${slot.day}-${slot.hour}`;
-                    const classroomKey = slot.classroomId ? `r-${slot.classroomId}-${slot.day}-${slot.hour}` : undefined;
 
-                    // Temel çakışma kontrolü
-                    if (newOccupiedSlots.has(teacherKey) || newOccupiedSlots.has(classKey) || 
-                        (classroomKey && newOccupiedSlots.has(classroomKey))) {
-                        continue;
+                    for (let day = 0; day < schoolInfo.daysInWeek; day++) {
+                        const dayLessons = dayLessonTimes[day] || [];
+                        if (dayLessons.length < blockSize) {
+                            continue;
+                        }
+                        for (let startHour = 0; startHour <= dayLessons.length - blockSize; startHour++) {
+                            const slotOptionsPerOffset: PlacementSlot[][] = [];
+                            let validBlock = true;
+                            for (let offset = 0; offset < blockSize; offset++) {
+                                const hour = startHour + offset;
+                                const options = gatherSlotOptions(entryItems, day, hour);
+                                if (options.length === 0) {
+                                    validBlock = false;
+                                    break;
+                                }
+                                slotOptionsPerOffset.push(options.slice(0, 3));
+                            }
+
+                            if (!validBlock) {
+                                continue;
+                            }
+
+                            const current: PlacementSlot[] = [];
+
+                            const buildCombinations = (offset: number) => {
+                                if (offset === slotOptionsPerOffset.length) {
+                                    const totalScore = current.reduce((sum, slot) => sum + slot.score, 0);
+                                    const key = current.map(s => `${s.day}-${s.hour}-${s.classroomId ?? '::none'}`).join('|');
+                                    if (!candidates.some(c => c.slots.length === current.length && c.slots.every((slot, idx) => slot.day === current[idx].day && slot.hour === current[idx].hour && slot.classroomId === current[idx].classroomId))) {
+                                        candidates.push({ slots: [...current], totalScore });
+                                    }
+                                    return;
+                                }
+
+                                for (const option of slotOptionsPerOffset[offset]) {
+                                    current.push(option);
+                                    buildCombinations(offset + 1);
+                                    current.pop();
+                                }
+                            };
+
+                            buildCombinations(0);
+                        }
                     }
-                    
-                    // Her şey tamam, yerleştir
-                    newAssignments.push({ ...item.req, ...slot, id: generateId() });
-                    newOccupiedSlots.add(teacherKey);
-                    newOccupiedSlots.add(classKey);
-                    if (classroomKey) newOccupiedSlots.add(classroomKey);
-                    placed = true;
-                    break;
+
+                    candidates.sort((a, b) => b.totalScore - a.totalScore);
+                    return candidates;
+                };
+
+                const lessonGroupEntries: LessonGroupEntry[] = [];
+                for (const [key, items] of lessonGroupMap.entries()) {
+                    const [classId, lessonName, teacherId] = key.split('::');
+                    const candidates = buildCandidatesForGroup(items);
+                    lessonGroupEntries.push({
+                        key,
+                        classId,
+                        teacherId,
+                        lessonName,
+                        items,
+                        blockSize: items.length,
+                        candidates,
+                        randomPriority: Math.random(),
+                    });
                 }
 
-                if (!placed) unassigned.push(item.req);
+                lessonGroupEntries.sort((a, b) => {
+                    if (a.candidates.length !== b.candidates.length) {
+                        return a.candidates.length - b.candidates.length;
+                    }
+                    if (b.blockSize !== a.blockSize) {
+                        return b.blockSize - a.blockSize;
+                    }
+                    return a.randomPriority - b.randomPriority;
+                });
+
+                const newOccupiedSlots = new Set(occupiedSlots);
+                const currentAssignments: Assignment[] = [];
+                let solutionAssignments: Assignment[] | null = null;
+                let success = false;
+
+                let bestPartialAssignments: Assignment[] = [];
+                let bestPartialUnassigned: any[] = [...requirements];
+                let bestPartialDepth = -1;
+
+                const updateBestPartial = (depth: number) => {
+                    if (success) {
+                        return;
+                    }
+                    if (depth > bestPartialDepth || (depth === bestPartialDepth && currentAssignments.length > bestPartialAssignments.length)) {
+                        bestPartialDepth = depth;
+                        bestPartialAssignments = [...currentAssignments];
+                        const remaining: any[] = [];
+                        for (let i = depth; i < lessonGroupEntries.length; i++) {
+                            const group = lessonGroupEntries[i];
+                            group.items.forEach(item => remaining.push(item.req));
+                        }
+                        bestPartialUnassigned = remaining;
+                    }
+                };
+
+                const dfs = (index: number): boolean => {
+                    if (index === lessonGroupEntries.length) {
+                        success = true;
+                        solutionAssignments = [...currentAssignments];
+                        return true;
+                    }
+
+                    const group = lessonGroupEntries[index];
+                    if (group.candidates.length === 0) {
+                        updateBestPartial(index);
+                        return false;
+                    }
+
+                    const orderedCandidates = [...group.candidates].sort((a, b) => {
+                        if (b.totalScore !== a.totalScore) {
+                            return b.totalScore - a.totalScore;
+                        }
+                        return Math.random() - 0.5;
+                    });
+
+                    for (const candidate of orderedCandidates) {
+                        let feasible = true;
+                        const addedAssignments: Assignment[] = [];
+                        const addedKeys: string[] = [];
+
+                        for (const slot of candidate.slots) {
+                            const teacherKey = `t-${group.teacherId}-${slot.day}-${slot.hour}`;
+                            const classKey = `c-${group.classId}-${slot.day}-${slot.hour}`;
+                            const classroomKey = slot.classroomId ? `r-${slot.classroomId}-${slot.day}-${slot.hour}` : undefined;
+
+                            if (newOccupiedSlots.has(teacherKey) || newOccupiedSlots.has(classKey) || (classroomKey && newOccupiedSlots.has(classroomKey))) {
+                                feasible = false;
+                                break;
+                            }
+
+                            const assignment: Assignment = {
+                                ...group.items[0].req,
+                                day: slot.day,
+                                hour: slot.hour,
+                                classroomId: slot.classroomId,
+                                id: generateId(),
+                            };
+
+                            currentAssignments.push(assignment);
+                            addedAssignments.push(assignment);
+
+                            newOccupiedSlots.add(teacherKey);
+                            newOccupiedSlots.add(classKey);
+                            addedKeys.push(teacherKey, classKey);
+                            if (classroomKey) {
+                                newOccupiedSlots.add(classroomKey);
+                                addedKeys.push(classroomKey);
+                            }
+                        }
+
+                        if (feasible) {
+                            if (dfs(index + 1)) {
+                                return true;
+                            }
+                        }
+
+                        for (let i = 0; i < addedAssignments.length; i++) {
+                            currentAssignments.pop();
+                        }
+                        for (const key of addedKeys) {
+                            newOccupiedSlots.delete(key);
+                        }
+                    }
+
+                    updateBestPartial(index);
+                    return false;
+                };
+
+                console.log(`📊 Toplam ${requirements.length} ders atanacak (${lessonGroupEntries.length} ders grubu)`);
+
+                const solved = dfs(0);
+
+                const finalAssignments = solved && solutionAssignments ? solutionAssignments : bestPartialAssignments;
+                const finalUnassigned = solved ? [] : bestPartialUnassigned;
+
+                if (!solved && finalUnassigned.length > 0) {
+                    alert(`⚠️ Otomatik atama tüm dersleri yerleştiremedi. Yerleşmeyen ders sayısı: ${finalUnassigned.length}. Lütfen müsaitlikleri kontrol edin.`);
+                }
+
+                console.log(`✅ Sonuç: ${finalAssignments.length}/${requirements.length} ders yerleştirildi${solved ? '' : ' (kısmi)'}`);
+
+                setAssignmentResult({ assigned: finalAssignments, unassigned: finalUnassigned, attemptCount: 1 });
+                setResultModalOpen(true);
+            } catch (error) {
+                console.error('❌ Otomatik atama sırasında hata oluştu:', error);
+                alert('Otomatik atama sırasında beklenmeyen bir hata oluştu. Lütfen tekrar deneyin.');
+            } finally {
+                setIsLoading(false);
             }
-            
-            setAssignmentResult({ assigned: newAssignments, unassigned });
-            setResultModalOpen(true);
-            setIsLoading(false);
-        }, 50);
+        }, 30);
     };
     
     const handleApplyResults = () => {
@@ -2138,6 +2295,8 @@ const AssignmentsPage = () => {
                 </div>
             </Card>
 
+
+
             <h2 className="text-lg font-semibold mt-8 mb-2">Ders Programı Tablosu</h2>
             <div className="mb-4 text-sm text-gray-600 dark:text-gray-400 bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
                 <p><strong>🎯 Akıllı Sürükle-Bırak Sistemi</strong></p>
@@ -2151,9 +2310,9 @@ const AssignmentsPage = () => {
                 </div>
             </div>
             <div className="overflow-x-auto bg-white dark:bg-gray-800 p-3 rounded-lg shadow-md">
-                <table className="w-full border-collapse text-center min-w-[900px] text-sm">
+                <table className="w-full border-collapse text-center text-sm">
                     <thead>
-                        <tr className="bg-gray-100 dark:bg-gray-700">
+                        <tr>
                             <th className="p-1 border dark:border-gray-300 dark:border-gray-600 w-20 text-xs">Gün</th>
                             <th className="p-1 border dark:border-gray-300 dark:border-gray-600 w-24 text-xs">Saat</th>
                             {data.classes.map(c => (
@@ -2164,145 +2323,178 @@ const AssignmentsPage = () => {
                     <tbody>
                         {Array.from({ length: data.schoolInfo.daysInWeek }).map((_, dayIndex) => (
                             <Fragment key={dayIndex}>
-                                {lessonTimes.map((lessonTime, hourIndex) => {
-                                    return (
-                                        <tr key={`${dayIndex}-${hourIndex}`} className="h-12">
-                                            {hourIndex === 0 && (
-                                                <td rowSpan={lessonTimes.length} className="p-1 border dark:border-gray-300 dark:border-gray-600 font-bold align-middle text-xs">
-                                                    {DAYS_OF_WEEK[dayIndex]}
-                                                </td>
-                                            )}
-                                            <td className="p-1 border dark:border-gray-300 dark:border-gray-600 font-mono text-xs whitespace-pre-wrap">
-                                                 {lessonTime ? (
+                                {(() => {
+                                    const dayLessons = dayLessonTimes[dayIndex] || [];
+                                    return dayLessons.map((lessonTime, hourIndex) => {
+                                        return (
+                                            <tr key={`${dayIndex}-${hourIndex}`} className="h-12">
+                                                {hourIndex === 0 && (
+                                                    <td rowSpan={dayLessons.length} className="p-1 border dark:border-gray-300 dark:border-gray-600 font-bold align-middle text-xs">
+                                                        {DAYS_OF_WEEK[dayIndex]}
+                                                    </td>
+                                                )}
+                                                <td className="p-1 border dark:border-gray-300 dark:border-gray-600 font-mono text-xs whitespace-pre-wrap">
                                                     <span className="text-xs leading-tight">
                                                         {lessonTime.start}<br/>-<br/>{lessonTime.end}
                                                     </span>
-                                                ) : <span className="text-xs">{hourIndex + 1}. Ders</span>}
-                                            </td>
-                                            {data.classes.map(c => {
-                                                const assignment = assignmentsByClassSlot.get(`${c.id}-${dayIndex}-${hourIndex}`);
-                                                const classStartHour = c.startHour ?? 0;
-                                                const classEndHour = c.endHour ?? lessonTimes.length - 1;
-                                                const isWithinClassHours = hourIndex >= classStartHour && hourIndex <= classEndHour;
+                                                </td>
+                                                {data.classes.map(c => {
+                                                    const assignment = assignmentsByClassSlot.get(`${c.id}-${dayIndex}-${hourIndex}`);
+                                                    
+                                                    // Sınıfın çalışma saatlerini müsaitlik tablosuna göre otomatik hesapla
+                                                    let classStartHour = 0;
+                                                    let classEndHour = 0;
+                                                    
+                                                    if (c.availability) {
+                                                        let minHour = Infinity;
+                                                        let maxHour = -1;
+                                                        
+                                                        for (let day = 0; day < data.schoolInfo.daysInWeek; day++) {
+                                                            const dayLessonsForCalc = dayLessonTimes[day] || [];
+                                                            for (let hour = 0; hour < dayLessonsForCalc.length; hour++) {
+                                                                const status = c.availability?.[day]?.[hour] || AvailabilityStatus.AVAILABLE;
+                                                                if (status !== AvailabilityStatus.UNAVAILABLE) {
+                                                                    minHour = Math.min(minHour, hour);
+                                                                    maxHour = Math.max(maxHour, hour);
+                                                                }
+                                                            }
+                                                        }
+                                                        
+                                                        if (maxHour >= 0) {
+                                                            classStartHour = minHour;
+                                                            classEndHour = maxHour;
+                                                        }
+                                                    } else {
+                                                        // Availability yoksa varsayılan değerleri kullan
+                                                        const allDayLessonCounts = Array.from({ length: data.schoolInfo.daysInWeek }, (_, dayIdx) => 
+                                                            (dayLessonTimes[dayIdx] || []).length
+                                                        );
+                                                        const maxLessonsAnyDay = Math.max(...allDayLessonCounts, 0);
+                                                        classStartHour = c.startHour ?? 0;
+                                                        classEndHour = c.endHour ?? (maxLessonsAnyDay > 0 ? maxLessonsAnyDay - 1 : 7);
+                                                    }
+                                                    
+                                                    const isWithinClassHours = hourIndex >= classStartHour && hourIndex <= classEndHour;
 
-                                                if (!isWithinClassHours) {
-                                                    return <td key={c.id} className="p-0.5 border dark:border-gray-300 dark:border-gray-600 align-middle bg-gray-50 dark:bg-gray-900/50 h-12" />;
-                                                }
-                                                
-                                                if (assignment) {
-                                                    const bgColor = getLessonColor(assignment.lessonName);
-                                                    const textColor = getTextColorForBg(bgColor);
-                                                    const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
-                                                    const isDragged = draggedItem?.sourceClassId === c.id && draggedItem?.sourceDay === dayIndex && draggedItem?.sourceHour === hourIndex;
-                                                    
-                                                    // Çakışma ve kural kontrolü
-                                                    let hasConflict = false;
-                                                    let hasRuleViolation = false;
-                                                    if (isDraggedOver && draggedItem && draggedItem.assignmentId !== assignment.id) {
-                                                        const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
-                                                        if (draggedAssignment) {
-                                                            const tempAssignment: Omit<Assignment, 'id'> = {
-                                                                ...draggedAssignment,
-                                                                classId: c.id,
-                                                                day: dayIndex,
-                                                                hour: hourIndex
-                                                            };
-                                                            const otherAssignments = data.assignments.filter(a => 
-                                                                a.id !== draggedItem.assignmentId && a.id !== assignment.id
-                                                            );
-                                                            hasConflict = !!checkConflict(tempAssignment, otherAssignments);
-                                                            const consecutiveCheck = checkConsecutiveLessonsRule(tempAssignment, otherAssignments);
-                                                            hasRuleViolation = !consecutiveCheck.isValid;
-                                                        }
+                                                    if (!isWithinClassHours) {
+                                                        return <td key={c.id} className="p-0.5 border dark:border-gray-300 dark:border-gray-600 align-middle bg-gray-50 dark:bg-gray-900/50 h-12" />;
                                                     }
                                                     
-                                                    return (
-                                                        <td 
-                                                            key={c.id} 
-                                                            className={`p-1 border dark:border-gray-300 dark:border-gray-600 align-middle relative group cursor-move select-none h-12 transition-all ${
-                                                                isDraggedOver 
-                                                                    ? hasConflict 
-                                                                        ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
-                                                                        : hasRuleViolation
-                                                                        ? 'ring-2 ring-yellow-400 bg-yellow-50 dark:bg-yellow-900/30'
-                                                                        : 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/30'
-                                                                    : ''
-                                                            } ${isDragged ? 'opacity-50' : ''}`}
-                                                            style={{ backgroundColor: isDraggedOver ? undefined : bgColor, color: isDraggedOver ? undefined : textColor }}
-                                                            draggable={true}
-                                                            onDragStart={(e) => handleDragStart(e, assignment, c.id, dayIndex, hourIndex)}
-                                                            onDragOver={(e) => handleDragOver(e, c.id, dayIndex, hourIndex)}
-                                                            onDragLeave={handleDragLeave}
-                                                            onDrop={(e) => handleDrop(e, c.id, dayIndex, hourIndex)}
-                                                            onDragEnd={handleDragEnd}
-                                                        >
-                                                            <div className="flex flex-col items-center justify-center text-center text-xs">
-                                                                <p className="font-bold leading-tight">{assignment.lessonName}</p>
-                                                                <p className="text-xs opacity-80">({getEntityName('teachers', assignment.teacherId)})</p>
-                                                            </div>
-                                                            <button 
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleDelete(c.id, dayIndex, hourIndex);
-                                                                }} 
-                                                                className="absolute top-0.5 right-0.5 text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 bg-white/80 rounded-full hover:bg-white" 
-                                                                aria-label="Sil"
-                                                            >
-                                                                <Icon icon="trash" className="w-3 h-3" />
-                                                            </button>
-                                                        </td>
-                                                    );
-                                                } else {
-                                                    const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
-                                                    
-                                                    // Boş hücre için çakışma ve kural kontrolü
-                                                    let hasConflict = false;
-                                                    let hasRuleViolation = false;
-                                                    if (isDraggedOver && draggedItem) {
-                                                        const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
-                                                        if (draggedAssignment) {
-                                                            const tempAssignment: Omit<Assignment, 'id'> = {
-                                                                ...draggedAssignment,
-                                                                classId: c.id,
-                                                                day: dayIndex,
-                                                                hour: hourIndex
-                                                            };
-                                                            const otherAssignments = data.assignments.filter(a => a.id !== draggedItem.assignmentId);
-                                                            hasConflict = !!checkConflict(tempAssignment, otherAssignments);
-                                                            const consecutiveCheck = checkConsecutiveLessonsRule(tempAssignment, otherAssignments);
-                                                            hasRuleViolation = !consecutiveCheck.isValid;
+                                                    if (assignment) {
+                                                        const bgColor = getLessonColor(assignment.lessonName);
+                                                        const textColor = getTextColorForBg(bgColor);
+                                                        const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
+                                                        const isDragged = draggedItem?.sourceClassId === c.id && draggedItem?.sourceDay === dayIndex && draggedItem?.sourceHour === hourIndex;
+                                                        
+                                                        // Çakışma ve kural kontrolü
+                                                        let hasConflict = false;
+                                                        let hasRuleViolation = false;
+                                                        if (isDraggedOver && draggedItem && draggedItem.assignmentId !== assignment.id) {
+                                                            const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
+                                                            if (draggedAssignment) {
+                                                                const tempAssignment: Omit<Assignment, 'id'> = {
+                                                                    ...draggedAssignment,
+                                                                    classId: c.id,
+                                                                    day: dayIndex,
+                                                                    hour: hourIndex
+                                                                };
+                                                                const otherAssignments = data.assignments.filter(a => 
+                                                                    a.id !== draggedItem.assignmentId && a.id !== assignment.id
+                                                                );
+                                                                hasConflict = !!checkConflict(tempAssignment, otherAssignments);
+                                                                const consecutiveCheck = checkConsecutiveLessonsRule(tempAssignment, otherAssignments);
+                                                                hasRuleViolation = !consecutiveCheck.isValid;
+                                                            }
                                                         }
-                                                    }
-                                                    
-                                                    return (
-                                                        <td 
-                                                            key={c.id} 
-                                                            className={`p-1 border dark:border-gray-300 dark:border-gray-600 align-middle h-12 transition-all ${
-                                                                isDraggedOver 
-                                                                    ? hasConflict 
-                                                                        ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
-                                                                        : hasRuleViolation
+                                                        
+                                                        return (
+                                                            <td 
+                                                                key={c.id} 
+                                                                className={`p-1 border dark:border-gray-300 dark:border-gray-600 align-middle relative group cursor-move select-none h-12 transition-all ${
+                                                                    isDraggedOver 
+                                                                        ? hasConflict 
+                                                                            ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
+                                                                            : hasRuleViolation
                                                                             ? 'ring-2 ring-yellow-400 bg-yellow-50 dark:bg-yellow-900/30'
-                                                                            : 'ring-2 ring-green-400 bg-green-50 dark:bg-green-900/30'
-                                                                    : ''
-                                                            }`}
-                                                            onDragOver={(e) => handleDragOver(e, c.id, dayIndex, hourIndex)}
-                                                            onDragLeave={handleDragLeave}
-                                                            onDrop={(e) => handleDrop(e, c.id, dayIndex, hourIndex)}
-                                                        >
-                                                            <button 
-                                                                onClick={() => handleOpenManualModal(dayIndex, hourIndex, c.id)} 
-                                                                className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-md transition-colors"
+                                                                            : 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/30'
+                                                                        : ''
+                                                                } ${isDragged ? 'opacity-50' : ''}`}
+                                                                style={{ backgroundColor: isDraggedOver ? undefined : bgColor, color: isDraggedOver ? undefined : textColor }}
+                                                                draggable={true}
+                                                                onDragStart={(e) => handleDragStart(e, assignment, c.id, dayIndex, hourIndex)}
+                                                                onDragOver={(e) => handleDragOver(e, c.id, dayIndex, hourIndex)}
+                                                                onDragLeave={handleDragLeave}
+                                                                onDrop={(e) => handleDrop(e, c.id, dayIndex, hourIndex)}
+                                                                onDragEnd={handleDragEnd}
                                                             >
-                                                                <Icon icon="plus" className="w-4 h-4"/>
-                                                            </button>
-                                                        </td>
-                                                    );
-                                                }
-                                            })}
-                                        </tr>
-                                    );
-                                })}
+                                                                <div className="flex flex-col items-center justify-center text-center text-xs">
+                                                                    <p className="font-bold leading-tight">{assignment.lessonName}</p>
+                                                                    <p className="text-xs opacity-80">({getEntityName('teachers', assignment.teacherId)})</p>
+                                                                </div>
+                                                                <button 
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleDelete(c.id, dayIndex, hourIndex);
+                                                                    }} 
+                                                                    className="absolute top-0.5 right-0.5 text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 bg-white/80 rounded-full hover:bg-white" 
+                                                                    aria-label="Sil"
+                                                                >
+                                                                    <Icon icon="trash" className="w-3 h-3" />
+                                                                </button>
+                                                            </td>
+                                                        );
+                                                    } else {
+                                                        const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
+                                                        
+                                                        // Boş hücre için çakışma ve kural kontrolü
+                                                        let hasConflict = false;
+                                                        let hasRuleViolation = false;
+                                                        if (isDraggedOver && draggedItem) {
+                                                            const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
+                                                            if (draggedAssignment) {
+                                                                const tempAssignment: Omit<Assignment, 'id'> = {
+                                                                    ...draggedAssignment,
+                                                                    classId: c.id,
+                                                                    day: dayIndex,
+                                                                    hour: hourIndex
+                                                                };
+                                                                const otherAssignments = data.assignments.filter(a => a.id !== draggedItem.assignmentId);
+                                                                hasConflict = !!checkConflict(tempAssignment, otherAssignments);
+                                                                const consecutiveCheck = checkConsecutiveLessonsRule(tempAssignment, otherAssignments);
+                                                                hasRuleViolation = !consecutiveCheck.isValid;
+                                                            }
+                                                        }
+                                                        
+                                                        return (
+                                                            <td 
+                                                                key={c.id} 
+                                                                className={`p-1 border dark:border-gray-300 dark:border-gray-600 align-middle h-12 transition-all ${
+                                                                    isDraggedOver 
+                                                                        ? hasConflict 
+                                                                            ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
+                                                                            : hasRuleViolation
+                                                                                ? 'ring-2 ring-yellow-400 bg-yellow-50 dark:bg-yellow-900/30'
+                                                                                : 'ring-2 ring-green-400 bg-green-50 dark:bg-green-900/30'
+                                                                        : ''
+                                                                }`}
+                                                                onDragOver={(e) => handleDragOver(e, c.id, dayIndex, hourIndex)}
+                                                                onDragLeave={handleDragLeave}
+                                                                onDrop={(e) => handleDrop(e, c.id, dayIndex, hourIndex)}
+                                                            >
+                                                                <button 
+                                                                    onClick={() => handleOpenManualModal(dayIndex, hourIndex, c.id)} 
+                                                                    className="w-full h-full flex flex-col items-center justify-center text-gray-300 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-md transition-colors"
+                                                                >
+                                                                    <Icon icon="plus" className="w-4 h-4"/>
+                                                                </button>
+                                                            </td>
+                                                        );
+                                                    }
+                                                })}
+                                            </tr>
+                                        );
+                                    });
+                                })()}
                             </Fragment>
                         ))}
                     </tbody>
@@ -2338,6 +2530,14 @@ const AssignmentsPage = () => {
                 {assignmentResult && (
                     <div className="space-y-4">
                         <p className="text-lg">Atama işlemi tamamlandı!</p>
+                        {assignmentResult.attemptCount && (
+                            <div className="p-4 bg-blue-100 dark:bg-blue-900/50 rounded-lg">
+                                <p className="font-semibold text-blue-800 dark:text-blue-200">
+                                    🎯 {assignmentResult.attemptCount} deneme yapıldı
+                                    {assignmentResult.unassigned.length === 0 && ' - Tüm dersler başarıyla yerleştirildi! 🎉'}
+                                </p>
+                            </div>
+                        )}
                         <div className="p-4 bg-green-100 dark:bg-green-900/50 rounded-lg">
                             <p className="font-semibold text-green-800 dark:text-green-200">Başarıyla atanan ders saati: {assignmentResult.assigned.length}</p>
                         </div>
@@ -2366,6 +2566,7 @@ const AssignmentsPage = () => {
 const ReportsPage = () => {
     const { data, setData } = useData();
     const lessonTimes = useLessonTimes();
+    const dayLessonTimes = useAllDayLessonTimes();
     const [reportType, setReportType] = useState<'class' | 'teacher'>('class');
     const [selectedId, setSelectedId] = useState<string>('');
     const fileInputRef = React.useRef<HTMLInputElement>(null);
@@ -2387,25 +2588,56 @@ const ReportsPage = () => {
         }
         
         const title = `${getEntityName(reportType === 'class' ? 'classes' : 'teachers', selectedId)} Ders Programı`;
-        const headers = [['Saat', ...DAYS_OF_WEEK.slice(0, data.schoolInfo.daysInWeek)]];
+        
+        // Günlük başlık oluştur (gün adı + saat aralığı)
+        const dayHeaders = Array.from({ length: data.schoolInfo.daysInWeek }).map((_, dayIndex) => {
+            const dayLessons = dayLessonTimes[dayIndex] || [];
+            const startTime = dayLessons.length > 0 ? dayLessons[0].start : '';
+            const endTime = dayLessons.length > 0 ? dayLessons[dayLessons.length - 1].end : '';
+            const dayName = DAYS_OF_WEEK[dayIndex];
+            
+            if (startTime && endTime) {
+                return `${dayName}\n(${startTime}-${endTime})`;
+            }
+            return dayName;
+        });
+        
+        const headers = [['Saat', ...dayHeaders]];
         const body: string[][] = [];
         
-        lessonTimes.forEach((time, hour) => {
-            const row = [time.label];
+        // Maksimum ders sayısını bul
+        const maxLessons = Math.max(...Array.from({ length: data.schoolInfo.daysInWeek }, (_, dayIndex) => 
+            dayLessonTimes[dayIndex]?.length || 0
+        ));
+        
+        // Her ders saati için satır oluştur
+        for (let hour = 0; hour < maxLessons; hour++) {
+            const row = [`${hour + 1}. Ders`];
+            
             for (let day = 0; day < data.schoolInfo.daysInWeek; day++) {
-                const assignment = reportData.find(a => a.day === day && a.hour === hour);
-                if (assignment) {
-                    const lesson = assignment.lessonName;
-                    const counterpart = reportType === 'class'
-                        ? getEntityName('teachers', assignment.teacherId)
-                        : getEntityName('classes', assignment.classId);
-                    row.push(`${lesson}\n${counterpart}`);
+                const dayLessons = dayLessonTimes[day] || [];
+                
+                if (hour >= dayLessons.length) {
+                    row.push(''); // Bu günde bu ders saati yok
                 } else {
-                    row.push('');
+                    const lesson = dayLessons[hour];
+                    const assignment = reportData.find(a => a.day === day && a.hour === hour);
+                    
+                    let cellContent = `${lesson.start}-${lesson.end}`;
+                    
+                    if (assignment) {
+                        const lessonName = assignment.lessonName;
+                        const counterpart = reportType === 'class'
+                            ? getEntityName('teachers', assignment.teacherId)
+                            : getEntityName('classes', assignment.classId);
+                        cellContent += `\n${lessonName}\n${counterpart}`;
+                    }
+                    
+                    row.push(cellContent);
                 }
             }
             body.push(row);
-        });
+        }
         
         try {
             await generatePdf(title, headers, body);
@@ -2468,32 +2700,136 @@ const ReportsPage = () => {
                         <table className="w-full border-collapse text-center">
                             <thead>
                                 <tr>
-                                    <th className="p-2 border dark:border-gray-600">Saat</th>
-                                    {Array.from({ length: data.schoolInfo.daysInWeek }).map((_, i) => (
-                                        <th key={i} className="p-2 border dark:border-gray-600 min-w-[150px]">{DAYS_OF_WEEK[i]}</th>
-                                    ))}
+                                    <th className="p-2 border dark:border-gray-600">Hafta İçi Saatleri</th>
+                                    {Array.from({ length: data.schoolInfo.daysInWeek }).map((_, i) => {
+                                        const elements = [];
+                                        
+                                        // Cuma (4) ile Cumartesi (5) arasında saat sütunu ekle
+                                        if (i === 5) { // Cumartesi'den önce
+                                            elements.push(
+                                                <th key="weekend-hours-header" className="p-2 border dark:border-gray-600 bg-yellow-100 dark:bg-yellow-900/30">
+                                                    <div className="text-center">
+                                                        <div className="font-bold">Hafta Sonu Saatleri</div>
+                                                        {dayLessonTimes[5] && dayLessonTimes[5].length > 0 && (
+                                                            <>
+                                                                <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                                                    {dayLessonTimes[5][0].start} - {dayLessonTimes[5][dayLessonTimes[5].length - 1].end}
+                                                                </div>
+                                                                <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                                    ({dayLessonTimes[5].length} ders)
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </th>
+                                            );
+                                        }
+                                        
+                                        // Normal gün başlığı
+                                        const dayLessons = dayLessonTimes[i] || [];
+                                        const startTime = dayLessons.length > 0 ? dayLessons[0].start : '';
+                                        const endTime = dayLessons.length > 0 ? dayLessons[dayLessons.length - 1].end : '';
+                                        const isWeekend = i >= 5; // Cumartesi (5) ve Pazar (6)
+                                        
+                                        elements.push(
+                                            <th key={i} className={`p-2 border dark:border-gray-600 min-w-[150px] ${isWeekend ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}`}>
+                                                <div className="text-center">
+                                                    <div className="font-bold">{DAYS_OF_WEEK[i]}</div>
+                                                    {startTime && endTime && (
+                                                        <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                                            {startTime} - {endTime}
+                                                        </div>
+                                                    )}
+                                                    {dayLessons.length > 0 && (
+                                                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                                                            ({dayLessons.length} ders)
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </th>
+                                        );
+                                        
+                                        return elements;
+                                    }).flat()}
                                 </tr>
                             </thead>
                             <tbody>
-                                {lessonTimes.map((time, hourIndex) => (
-                                    <tr key={hourIndex}>
-                                        <td className="p-2 border dark:border-gray-600 font-mono h-20">{time.label}</td>
-                                        {Array.from({ length: data.schoolInfo.daysInWeek }).map((_, dayIndex) => {
-                                            const assignment = reportData.find(a => a.day === dayIndex && a.hour === hourIndex);
-                                            return (
-                                                <td key={dayIndex} className="p-2 border dark:border-gray-600 align-top text-sm">
-                                                    {assignment && (
-                                                         <div className="bg-blue-100 dark:bg-blue-900/50 p-2 rounded-lg text-left">
-                                                            <p className="font-bold">{assignment.lessonName}</p>
-                                                            <p>{reportType === 'class' ? getEntityName('teachers', assignment.teacherId) : getEntityName('classes', assignment.classId)}</p>
-                                                            {assignment.classroomId && <p className="text-xs text-gray-500">{getEntityName('classrooms', assignment.classroomId)}</p>}
-                                                         </div>
+                                {(() => {
+                                    // Tüm günlerin maksimum ders sayısını bul
+                                    const maxLessons = Math.max(...Array.from({ length: data.schoolInfo.daysInWeek }, (_, dayIndex) => 
+                                        dayLessonTimes[dayIndex]?.length || 0
+                                    ));
+                                    
+                                    return Array.from({ length: maxLessons }).map((_, hourIndex) => (
+                                        <tr key={hourIndex}>
+                                            <td className="p-2 border dark:border-gray-600 font-mono h-20 bg-gray-50 dark:bg-gray-800">
+                                                <div className="text-center">
+                                                    <div className="font-bold">{hourIndex + 1}. Ders</div>
+                                                    {/* Hafta içi saatleri göster (Pazartesi'nin saatlerini referans al) */}
+                                                    {dayLessonTimes[0] && dayLessonTimes[0][hourIndex] && (
+                                                        <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                                            {dayLessonTimes[0][hourIndex].start} - {dayLessonTimes[0][hourIndex].end}
+                                                        </div>
                                                     )}
-                                                </td>
-                                            );
-                                        })}
-                                    </tr>
-                                ))}
+                                                </div>
+                                            </td>
+                                            {Array.from({ length: data.schoolInfo.daysInWeek }).map((_, dayIndex) => {
+                                                // Cuma (4) ile Cumartesi (5) arasında saat sütunu ekle
+                                                const elements = [];
+                                                
+                                                if (dayIndex === 5) { // Cumartesi'den önce
+                                                    elements.push(
+                                                        <td key="weekend-hours" className="p-2 border dark:border-gray-600 font-mono h-20 bg-yellow-100 dark:bg-yellow-900/30">
+                                                            <div className="text-center">
+                                                                <div className="font-bold">{hourIndex + 1}. Ders</div>
+                                                                {/* Hafta sonu saatleri göster (Cumartesi'nin saatlerini referans al) */}
+                                                                {dayLessonTimes[5] && dayLessonTimes[5][hourIndex] && (
+                                                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                                                        {dayLessonTimes[5][hourIndex].start} - {dayLessonTimes[5][hourIndex].end}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </td>
+                                                    );
+                                                }
+                                                
+                                                // Normal gün sütunu
+                                                const dayLessons = dayLessonTimes[dayIndex] || [];
+                                                const isWeekend = dayIndex >= 5; // Cumartesi (5) ve Pazar (6)
+                                                
+                                                // Bu günde bu ders saati var mı?
+                                                if (hourIndex >= dayLessons.length) {
+                                                    elements.push(
+                                                        <td key={dayIndex} className={`p-2 border dark:border-gray-600 bg-gray-100 dark:bg-gray-700 ${isWeekend ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}`}>
+                                                        </td>
+                                                    );
+                                                } else {
+                                                    const lesson = dayLessons[hourIndex];
+                                                    const assignment = reportData.find(a => a.day === dayIndex && a.hour === hourIndex);
+                                                    
+                                                    elements.push(
+                                                        <td key={dayIndex} className={`p-2 border dark:border-gray-600 align-top text-sm ${isWeekend ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}`}>
+                                                            {/* Ders saati bilgisi */}
+                                                            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-mono">
+                                                                {lesson.start} - {lesson.end}
+                                                            </div>
+                                                            {/* Atanan ders */}
+                                                            {assignment && (
+                                                                 <div className="bg-blue-100 dark:bg-blue-900/50 p-2 rounded-lg text-left">
+                                                                    <p className="font-bold">{assignment.lessonName}</p>
+                                                                    <p>{reportType === 'class' ? getEntityName('teachers', assignment.teacherId) : getEntityName('classes', assignment.classId)}</p>
+                                                                    {assignment.classroomId && <p className="text-xs text-gray-500">{getEntityName('classrooms', assignment.classroomId)}</p>}
+                                                                 </div>
+                                                            )}
+                                                        </td>
+                                                    );
+                                                }
+                                                
+                                                return elements;
+                                            }).flat()}
+                                        </tr>
+                                    ));
+                                })()}
                             </tbody>
                         </table>
                      </div>

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test ve Sorun Giderme</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-lg p-6">
+        <h1 class="text-2xl font-bold text-red-600 mb-4">🔧 Sorun Giderme Paneli</h1>
+        
+        <div class="space-y-4">
+            <div class="border-2 border-yellow-400 bg-yellow-50 p-4 rounded-lg">
+                <h2 class="font-bold text-lg mb-2">⚠️ Sınıflar Görünmüyor mu?</h2>
+                <p class="text-sm mb-3">Aşağıdaki adımları takip edin:</p>
+                
+                <div class="space-y-2">
+                    <button onclick="clearStorage()" 
+                            class="w-full px-4 py-3 bg-red-500 text-white rounded-lg font-bold hover:bg-red-600">
+                        1️⃣ TÜM VERİLERİ SİL (LocalStorage Temizle)
+                    </button>
+                    
+                    <button onclick="testAdd()" 
+                            class="w-full px-4 py-3 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600">
+                        2️⃣ TEST SINIFI EKLE (9-A Test)
+                    </button>
+                    
+                    <button onclick="showData()" 
+                            class="w-full px-4 py-3 bg-blue-500 text-white rounded-lg font-bold hover:bg-blue-600">
+                        3️⃣ KAYITLI VERİLERİ GÖSTER
+                    </button>
+                    
+                    <button onclick="location.href='index.html'" 
+                            class="w-full px-4 py-3 bg-indigo-500 text-white rounded-lg font-bold hover:bg-indigo-600">
+                        4️⃣ ANA SAYFAYA GİT
+                    </button>
+                </div>
+            </div>
+            
+            <div id="result" class="border-2 border-gray-300 p-4 rounded-lg bg-gray-50 min-h-32">
+                <h3 class="font-bold mb-2">📊 Sonuç:</h3>
+                <pre id="output" class="text-sm overflow-auto">Henüz işlem yapılmadı...</pre>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function clearStorage() {
+            localStorage.clear();
+            document.getElementById('output').textContent = '✅ Tüm veriler silindi!\n\nŞimdi "Test Sınıfı Ekle" butonuna tıklayın.';
+        }
+        
+        function testAdd() {
+            const testClass = {
+                name: '9-A Test',
+                activeDays: [0, 1, 2, 3, 4]
+            };
+            
+            // LocalStorage'a kaydet
+            const classes = [testClass];
+            localStorage.setItem('classes', JSON.stringify(classes));
+            
+            document.getElementById('output').textContent = '✅ Test sınıfı eklendi!\n\n' + JSON.stringify(testClass, null, 2) + '\n\nŞimdi "Kayıtlı Verileri Göster" butonuna tıklayın.';
+        }
+        
+        function showData() {
+            const classes = localStorage.getItem('classes');
+            const lessons = localStorage.getItem('lessons');
+            
+            let output = '📦 LOCALSTORAGE VERİLERİ:\n\n';
+            
+            output += '🏫 SINIFLAR:\n';
+            if (classes) {
+                try {
+                    const parsed = JSON.parse(classes);
+                    output += JSON.stringify(parsed, null, 2);
+                    output += '\n\n✅ Toplam ' + parsed.length + ' sınıf var.\n';
+                } catch(e) {
+                    output += '❌ Hata: ' + e.message + '\n';
+                }
+            } else {
+                output += '❌ Hiç sınıf yok!\n';
+            }
+            
+            output += '\n📚 DERSLER:\n';
+            if (lessons) {
+                try {
+                    const parsed = JSON.parse(lessons);
+                    output += JSON.stringify(parsed, null, 2);
+                } catch(e) {
+                    output += '❌ Hata: ' + e.message + '\n';
+                }
+            } else {
+                output += '❌ Hiç ders yok!\n';
+            }
+            
+            document.getElementById('output').textContent = output;
+        }
+        
+        // Sayfa yüklendiğinde verileri göster
+        window.onload = showData;
+    </script>
+</body>
+</html>

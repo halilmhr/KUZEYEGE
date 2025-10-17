@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ders Programı Oluşturucu</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- html2canvas for PNG export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    
+    <!-- jsPDF for PDF export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <!-- jsPDF autoTable eklentisi - Gerçek tablo PDF'i için -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    
+    <style>
+        /* Sürükle-bırak için özel stiller */
+        .dragging {
+            opacity: 0.5;
+            cursor: move;
+        }
+        
+        .drag-over {
+            background-color: #e0f2fe !important;
+            border: 2px dashed #0284c7;
+        }
+        
+        .lesson-cell {
+            transition: all 0.2s ease;
+        }
+        
+        .lesson-cell:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Animasyonlar */
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .slide-in {
+            animation: slideIn 0.3s ease;
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-6">
+    <div class="max-w-7xl mx-auto">
+        <!-- Başlık -->
+        <header class="text-center mb-8">
+            <div class="flex justify-between items-center max-w-4xl mx-auto">
+                <div></div>
+                <div>
+                    <h1 class="text-4xl font-bold text-indigo-900 mb-2">📚 Ders Programı Oluşturucu</h1>
+                    <p class="text-gray-600">Çakışmasız ders programı oluşturun</p>
+                </div>
+                <button onclick="if(confirm('Tüm veriler silinecek. Emin misiniz?')) { localStorage.clear(); location.reload(); }" 
+                        class="px-4 py-2 bg-red-500 text-white rounded-lg text-sm hover:bg-red-600 transition shadow-md">
+                    🗑️ Tümünü Sıfırla
+                </button>
+            </div>
+        </header>
+
+        <!-- Ana Container -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Sol Panel - Ders Ekleme Formu -->
+            <div id="leftPanel" class="lg:col-span-1 transition-all duration-300">
+                <!-- Sınıf Yönetimi -->
+                <div class="bg-white rounded-lg shadow-lg p-6 mb-6 slide-in">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">🏫 Sınıf Yönetimi</h2>
+                    
+                    <form id="classForm" class="space-y-4">
+                        <!-- Düzenleme modu için hidden field -->
+                        <input type="hidden" id="editingClassName" value="">
+                        
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">
+                                Sınıf Adı
+                            </label>
+                            <input type="text" id="newClassName" required
+                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                   placeholder="Örn: 9-A">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">
+                                📅 Ders Günleri
+                            </label>
+                            <div class="grid grid-cols-7 gap-1">
+                                <label class="flex flex-col items-center p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-indigo-50 transition">
+                                    <input type="checkbox" value="0" class="class-day-checkbox mb-1" checked>
+                                    <span class="text-xs font-semibold">Pzt</span>
+                                </label>
+                                <label class="flex flex-col items-center p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-indigo-50 transition">
+                                    <input type="checkbox" value="1" class="class-day-checkbox mb-1" checked>
+                                    <span class="text-xs font-semibold">Sal</span>
+                                </label>
+                                <label class="flex flex-col items-center p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-indigo-50 transition">
+                                    <input type="checkbox" value="2" class="class-day-checkbox mb-1" checked>
+                                    <span class="text-xs font-semibold">Çar</span>
+                                </label>
+                                <label class="flex flex-col items-center p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-indigo-50 transition">
+                                    <input type="checkbox" value="3" class="class-day-checkbox mb-1" checked>
+                                    <span class="text-xs font-semibold">Per</span>
+                                </label>
+                                <label class="flex flex-col items-center p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-indigo-50 transition">
+                                    <input type="checkbox" value="4" class="class-day-checkbox mb-1" checked>
+                                    <span class="text-xs font-semibold">Cum</span>
+                                </label>
+                                <label class="flex flex-col items-center p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-green-50 transition">
+                                    <input type="checkbox" value="5" class="class-day-checkbox mb-1">
+                                    <span class="text-xs font-semibold">Cmt</span>
+                                </label>
+                                <label class="flex flex-col items-center p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-red-50 transition">
+                                    <input type="checkbox" value="6" class="class-day-checkbox mb-1">
+                                    <span class="text-xs font-semibold">Paz</span>
+                                </label>
+                            </div>
+                        </div>
+                        
+                        <!-- Zaman Ayarları -->
+                        <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                            <h3 class="text-sm font-bold text-blue-800 mb-3">⏰ Zaman Ayarları</h3>
+                            
+                            <div class="grid grid-cols-2 gap-3 mb-3">
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1">Başlangıç Saati</label>
+                                    <input type="time" id="classStartTime" value="08:50" required
+                                           class="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1">Bitiş Saati</label>
+                                    <input type="time" id="classEndTime" value="12:50" required
+                                           class="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500">
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1">Ders Süresi (dk)</label>
+                                    <input type="number" id="lessonDuration" value="40" min="10" max="90" required
+                                           class="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-gray-700 mb-1">Teneffüs Süresi (dk)</label>
+                                    <input type="number" id="breakDuration" value="10" min="5" max="30" required
+                                           class="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-500">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex space-x-2">
+                            <button type="submit" id="classSubmitBtn"
+                                    class="flex-1 px-6 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition shadow-md">
+                                ➕ Sınıf Ekle
+                            </button>
+                            <button type="button" id="classCancelBtn" onclick="window.uiManager.cancelEditClass()" 
+                                    class="hidden px-4 py-2 bg-gray-500 text-white rounded-lg font-semibold hover:bg-gray-600 transition shadow-md">
+                                İptal
+                            </button>
+                        </div>
+                    </form>
+                    
+                    <div class="mt-4">
+                        <h3 class="text-sm font-bold text-gray-700 mb-2">📋 Eklenen Sınıflar</h3>
+                        <div id="classList" class="space-y-2 max-h-64 overflow-y-auto">
+                            <!-- Sınıflar buraya eklenecek -->
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-lg shadow-lg p-6 slide-in">
+                    <h2 class="text-2xl font-bold text-gray-800 mb-4">➕ Ders Ekle</h2>
+                    
+                    <form id="lessonForm" class="space-y-4">
+                        <!-- Öğretmen Adı -->
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">
+                                👨‍🏫 Öğretmen Adı
+                            </label>
+                            <input type="text" id="teacherName" required
+                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                   placeholder="Örn: Ahmet Yılmaz">
+                        </div>
+
+                        <!-- Ders Adı -->
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">
+                                📖 Ders Adı
+                            </label>
+                            <select id="lessonName" required
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white">
+                                <option value="">Ders Seçin</option>
+                                <option value="Matematik">Matematik</option>
+                                <option value="Fizik">Fizik</option>
+                                <option value="Kimya">Kimya</option>
+                                <option value="Biyoloji">Biyoloji</option>
+                                <option value="Türkçe">Türkçe</option>
+                                <option value="Edebiyat">Edebiyat</option>
+                                <option value="Tarih">Tarih</option>
+                                <option value="Coğrafya">Coğrafya</option>
+                                <option value="Felsefe">Felsefe</option>
+                                <option value="İngilizce">İngilizce</option>
+                                <option value="Almanca">Almanca</option>
+                                <option value="Fransızca">Fransızca</option>
+                                <option value="Din Kültürü">Din Kültürü</option>
+                                <option value="Beden Eğitimi">Beden Eğitimi</option>
+                                <option value="Müzik">Müzik</option>
+                                <option value="Görsel Sanatlar">Görsel Sanatlar</option>
+                                <option value="Rehberlik">Rehberlik</option>
+                                <option value="Bilişim Teknolojileri">Bilişim Teknolojileri</option>
+                                <option value="other">🖊️ Diğer (Manuel Gir)</option>
+                            </select>
+                            
+                            <!-- Manuel ders adı girişi -->
+                            <input type="text" id="customLessonName" 
+                                   class="hidden mt-2 w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                   placeholder="Ders adını yazın...">
+                        </div>
+
+                        <!-- Sınıf Seçimi -->
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">
+                                🎓 Hangi Sınıflara Verilecek
+                            </label>
+                            <div id="classSelectionContainer" class="grid grid-cols-2 gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200 max-h-32 overflow-y-auto">
+                                <!-- Sınıflar buraya dinamik olarak eklenecek -->
+                                <p class="text-gray-500 text-sm col-span-2 text-center">Henüz sınıf eklenmedi</p>
+                            </div>
+                        </div>
+
+                        <!-- Haftalık Saat Sayısı -->
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">
+                                � Haftalık Kaç Saat
+                            </label>
+                            <select id="weeklyHours" required
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white">
+                                <option value="">Saat Seçin</option>
+                                <option value="1">1 saat/hafta</option>
+                                <option value="2">2 saat/hafta</option>
+                                <option value="3">3 saat/hafta</option>
+                                <option value="4">4 saat/hafta</option>
+                                <option value="5">5 saat/hafta</option>
+                                <option value="6">6 saat/hafta</option>
+                                <option value="7">7 saat/hafta</option>
+                                <option value="8">8 saat/hafta</option>
+                            </select>
+                        </div>
+
+                        <!-- Arka Arkaya Yerleştirme -->
+                        <div>
+                            <label class="flex items-center space-x-2 cursor-pointer p-3 bg-indigo-50 rounded-lg border border-indigo-200 hover:bg-indigo-100 transition">
+                                <input type="checkbox" id="consecutiveLessons" checked
+                                       class="w-5 h-5 rounded text-indigo-600">
+                                <div>
+                                    <span class="font-semibold text-gray-800">📌 Arka Arkaya Yerleştir</span>
+                                    <p class="text-xs text-gray-600">2+ saatlik derslerde ilk 2 saat arka arkaya olsun</p>
+                                </div>
+                            </label>
+                        </div>
+
+                        <!-- Uygun Günler -->
+                        <div>
+                            <label class="block text-sm font-semibold text-gray-700 mb-2">
+                                📅 Uygun Günler (İsteğe Bağlı)
+                            </label>
+                            <div class="grid grid-cols-4 gap-2">
+                                <label class="flex items-center space-x-1 cursor-pointer">
+                                    <input type="checkbox" value="0" class="available-day rounded text-indigo-600">
+                                    <span class="text-xs">Pzt</span>
+                                </label>
+                                <label class="flex items-center space-x-1 cursor-pointer">
+                                    <input type="checkbox" value="1" class="available-day rounded text-indigo-600">
+                                    <span class="text-xs">Sal</span>
+                                </label>
+                                <label class="flex items-center space-x-1 cursor-pointer">
+                                    <input type="checkbox" value="2" class="available-day rounded text-indigo-600">
+                                    <span class="text-xs">Çar</span>
+                                </label>
+                                <label class="flex items-center space-x-1 cursor-pointer">
+                                    <input type="checkbox" value="3" class="available-day rounded text-indigo-600">
+                                    <span class="text-xs">Per</span>
+                                </label>
+                                <label class="flex items-center space-x-1 cursor-pointer">
+                                    <input type="checkbox" value="4" class="available-day rounded text-indigo-600">
+                                    <span class="text-xs">Cum</span>
+                                </label>
+                                <label class="flex items-center space-x-1 cursor-pointer">
+                                    <input type="checkbox" value="5" class="available-day rounded text-green-600">
+                                    <span class="text-xs">Cmt</span>
+                                </label>
+                                <label class="flex items-center space-x-1 cursor-pointer">
+                                    <input type="checkbox" value="6" class="available-day rounded text-red-600">
+                                    <span class="text-xs">Paz</span>
+                                </label>
+                            </div>
+                        </div>
+
+
+
+                        <!-- Butonlar -->
+                        <div class="flex gap-2">
+                            <button type="submit" 
+                                    class="flex-1 bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-indigo-700 transition duration-200 shadow-md">
+                                ➕ Ekle
+                            </button>
+                            <button type="button" id="clearForm"
+                                    class="px-4 py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition duration-200">
+                                🗑️
+                            </button>
+                        </div>
+                    </form>
+
+                    <!-- Eklenen Dersler Listesi -->
+                    <div class="mt-6">
+                        <h3 class="text-lg font-bold text-gray-800 mb-3">📋 Eklenen Dersler</h3>
+                        <div id="lessonsList" class="space-y-2 max-h-64 overflow-y-auto">
+                            <!-- Dersler buraya eklenecek -->
+                        </div>
+                    </div>
+
+                    <!-- Butonlar -->
+                    <div class="mt-6 space-y-3">
+                        <button id="showEmptySchedule" 
+                                class="w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md">
+                            📋 Boş Program Göster
+                        </button>
+                        <button id="generateSchedule" 
+                                class="w-full bg-green-600 text-white px-6 py-4 rounded-lg font-bold text-lg hover:bg-green-700 transition duration-200 shadow-lg">
+                            ✨ Ders Programı Oluştur
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sağ Panel - Ders Programı Tablosu -->
+            <div id="rightPanel" class="lg:col-span-2 transition-all duration-300">
+                <!-- Öğretmen Listesi -->
+                <div id="teacherPanel" class="bg-white rounded-lg shadow-lg p-4 mb-4 slide-in hidden">
+                    <h3 class="text-lg font-bold text-gray-800 mb-3">👨‍🏫 Öğretmen Kısıtlamaları</h3>
+                    
+                    <!-- Açıklama -->
+                    <div class="bg-blue-50 border-l-4 border-blue-500 p-3 mb-3 text-sm">
+                        <div class="font-semibold text-blue-800 mb-1">📌 Nasıl Kullanılır?</div>
+                        <ul class="text-blue-700 space-y-1 text-xs">
+                            <li>• <strong>Sınıf kısıtı için:</strong> Direkt hücreye tıklayın (❌)</li>
+                            <li>• <strong>Öğretmen kısıtı için:</strong> Önce öğretmen seçin, sonra hücrelere tıklayın (👨‍🏫)</li>
+                            <li>• <strong>Her öğretmenin ayrı kısıtlaması var!</strong> Öğretmen değiştirdiğinizde sadece o öğretmenin kısıtları görünür</li>
+                            <li>• Tekrar tıklayarak kısıtı kaldırabilirsiniz</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="text-sm text-gray-600 mb-2">Öğretmen seçin ve SADECE O ÖĞRETMEN için müsait olmadığı yerleri işaretleyin:</div>
+                    <div id="teacherList" class="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        <!-- Öğretmenler buraya eklenecek -->
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow-lg p-6 slide-in">
+                    <div class="flex justify-between items-center mb-4">
+                        <div class="flex items-center gap-4">
+                            <!-- Panel Kapatma Butonu -->
+                            <button id="toggleLeftPanel" 
+                                    class="px-3 py-2 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 transition shadow-md text-sm"
+                                    title="Sol paneli aç/kapat">
+                                ◀ Formu Gizle
+                            </button>
+                            <h2 class="text-2xl font-bold text-gray-800">📅 Haftalık Ders Programı</h2>
+                        </div>
+                        
+                        <!-- Export Butonları -->
+                        <div class="flex gap-2">
+                            <button id="exportPNG" 
+                                    class="px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition duration-200 shadow-md text-sm">
+                                📷 PNG İndir
+                            </button>
+                            <button id="exportPDF" 
+                                    class="px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition duration-200 shadow-md text-sm">
+                                📄 PDF İndir
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Uyarı Mesajı -->
+                    <div id="warningMessage" class="hidden mb-4 p-4 bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 rounded">
+                        <p class="font-semibold">⚠️ Dikkat!</p>
+                        <ul id="warningList" class="list-disc list-inside mt-2"></ul>
+                    </div>
+
+                    <!-- Ders Programı Tablosu - TEK DOSYA GÖRÜNÜMÜ -->
+                    <div id="scheduleTable" class="overflow-x-auto">
+                        <div id="masterScheduleView">
+                            <!-- Ana program tablosu buraya gelecek -->
+                        </div>
+                    </div>
+
+                    <!-- Bilgilendirme -->
+                    <div class="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                        <p class="text-sm text-blue-800">
+                            💡 <strong>İpucu:</strong> Ders programı oluşturduktan sonra, dersleri sürükleyip bırakarak manuel olarak düzenleyebilirsiniz.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="app.js"></script>
+</body>
+</html>
