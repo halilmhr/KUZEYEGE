@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { AppData, SchoolInfo, AvailabilityStatus, Availability, Teacher, ClassData, Classroom, Assignment, CurriculumItem, LessonTime } from './types';
 import { generateId, exportDataAsJSON, generatePdf } from './utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { supabase, type DatabaseBackup } from './supabase';
 
 
 // --- CONSTANTS ---
@@ -75,9 +76,28 @@ const ThemeContext = createContext<{ theme: Theme; toggleTheme: () => void }>({
   toggleTheme: () => {},
 });
 
-const DataContext = createContext<{ data: AppData; setData: React.Dispatch<React.SetStateAction<AppData>> }>({
+const DataContext = createContext<{ 
+    data: AppData; 
+    setData: React.Dispatch<React.SetStateAction<AppData>>;
+    backups: DatabaseBackup[];
+    isLoadingBackups: boolean;
+    backupModalOpen: boolean;
+    setBackupModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+    saveBackup: (name: string) => Promise<void>;
+    loadBackups: () => Promise<void>;
+    restoreBackup: (backup: DatabaseBackup) => Promise<void>;
+    deleteBackup: (backupId: string) => Promise<void>;
+}>({
   data: INITIAL_DATA,
   setData: () => {},
+  backups: [],
+  isLoadingBackups: false,
+  backupModalOpen: false,
+  setBackupModalOpen: () => {},
+  saveBackup: async () => {},
+  loadBackups: async () => {},
+  restoreBackup: async () => {},
+  deleteBackup: async () => {},
 });
 
 // --- HOOKS ---
@@ -245,7 +265,104 @@ const DataProvider: FC<{children: ReactNode}> = ({ children }) => {
         }
     }, [data]);
 
-    return <DataContext.Provider value={{ data, setData }}>{children}</DataContext.Provider>;
+    // Yedekleme sistemi state'leri
+    const [backups, setBackups] = useState<DatabaseBackup[]>([]);
+    const [isLoadingBackups, setIsLoadingBackups] = useState(false);
+    const [backupModalOpen, setBackupModalOpen] = useState(false);
+
+    // Yedekleme fonksiyonları
+    const saveBackup = async (name: string) => {
+        try {
+            setIsLoadingBackups(true);
+            const { data: savedBackup, error } = await supabase
+                .from('program_backups')
+                .insert({
+                    name: name,
+                    data: data,
+                    created_at: new Date().toISOString()
+                })
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            alert('✅ Yedek başarıyla kaydedildi!');
+            loadBackups(); // Yedekler listesini yenile
+        } catch (error) {
+            console.error('Yedekleme hatası:', error);
+            alert('❌ Yedekleme başarısız: ' + (error as Error).message);
+        } finally {
+            setIsLoadingBackups(false);
+        }
+    };
+
+    const loadBackups = async () => {
+        try {
+            setIsLoadingBackups(true);
+            const { data: backupData, error } = await supabase
+                .from('program_backups')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            setBackups(backupData || []);
+        } catch (error) {
+            console.error('Yedekler yükleme hatası:', error);
+        } finally {
+            setIsLoadingBackups(false);
+        }
+    };
+
+    const restoreBackup = async (backup: DatabaseBackup) => {
+        try {
+            if (confirm(`"${backup.name}" yedeğini geri yüklemek istediğinize emin misiniz? Mevcut veriler kaybolacak!`)) {
+                setData(backup.data);
+                alert('✅ Yedek başarıyla geri yüklendi!');
+                setBackupModalOpen(false);
+            }
+        } catch (error) {
+            console.error('Geri yükleme hatası:', error);
+            alert('❌ Geri yükleme başarısız: ' + (error as Error).message);
+        }
+    };
+
+    const deleteBackup = async (backupId: string) => {
+        try {
+            if (confirm('Bu yedeği silmek istediğinize emin misiniz?')) {
+                const { error } = await supabase
+                    .from('program_backups')
+                    .delete()
+                    .eq('id', backupId);
+
+                if (error) throw error;
+
+                alert('✅ Yedek başarıyla silindi!');
+                loadBackups(); // Listeyi yenile
+            }
+        } catch (error) {
+            console.error('Silme hatası:', error);
+            alert('❌ Silme başarısız: ' + (error as Error).message);
+        }
+    };
+
+    // Component mount olduğunda yedekleri yükle
+    useEffect(() => {
+        loadBackups();
+    }, []);
+
+    return <DataContext.Provider value={{ 
+        data, 
+        setData, 
+        backups, 
+        isLoadingBackups, 
+        backupModalOpen, 
+        setBackupModalOpen, 
+        saveBackup, 
+        loadBackups, 
+        restoreBackup, 
+        deleteBackup 
+    }}>{children}</DataContext.Provider>;
 };
 
 // --- ICON COMPONENT ---
@@ -444,7 +561,7 @@ const Sidebar: FC<{
 
 const Header: FC<{ onMenuClick: () => void }> = ({ onMenuClick }) => {
     const { theme, toggleTheme } = useTheme();
-    const { data, setData } = useData();
+    const { data, setData, setBackupModalOpen } = useData();
     const location = useLocation();
 
     const pageTitles: {[key: string]: string} = {
@@ -473,6 +590,10 @@ const Header: FC<{ onMenuClick: () => void }> = ({ onMenuClick }) => {
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">{pageTitles[location.pathname] || 'Ders Planlama'}</h2>
             </div>
             <div className="flex items-center gap-4">
+                <Button onClick={() => setBackupModalOpen(true)} variant="secondary">
+                    <Icon icon="database" className="w-5 h-5" />
+                    <span className="hidden sm:inline">Yedekle</span>
+                </Button>
                 <Button onClick={handleReset} variant="danger">
                     <Icon icon="refresh" className="w-5 h-5" />
                     <span className="hidden sm:inline">Yeniden Başlat</span>
@@ -2884,6 +3005,7 @@ export default function App() {
                                     <Route path="/reports" element={<PageLayout><ReportsPage /></PageLayout>} />
                                 </Routes>
                             </AnimatePresence>
+                            <BackupModal />
                         </main>
                     </div>
                 </div>
@@ -2892,6 +3014,113 @@ export default function App() {
     </ThemeProvider>
   );
 }
+
+const BackupModal: FC = () => {
+    const { 
+        backups, 
+        isLoadingBackups, 
+        backupModalOpen, 
+        setBackupModalOpen, 
+        saveBackup, 
+        restoreBackup, 
+        deleteBackup 
+    } = useData();
+    
+    const [backupName, setBackupName] = useState('');
+
+    const handleSaveBackup = async () => {
+        if (!backupName.trim()) {
+            alert('Lütfen yedek adı girin!');
+            return;
+        }
+        
+        await saveBackup(backupName.trim());
+        setBackupName('');
+    };
+
+    const formatDate = (dateString: string) => {
+        return new Date(dateString).toLocaleString('tr-TR');
+    };
+
+    if (!backupModalOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-xl font-bold">Program Yedekleme</h2>
+                    <button 
+                        onClick={() => setBackupModalOpen(false)}
+                        className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                    >
+                        <Icon icon="x" className="w-6 h-6" />
+                    </button>
+                </div>
+
+                {/* Yeni Yedek Oluşturma */}
+                <div className="mb-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                    <h3 className="text-lg font-semibold mb-3">Yeni Yedek Oluştur</h3>
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            value={backupName}
+                            onChange={(e) => setBackupName(e.target.value)}
+                            placeholder="Yedek adı girin..."
+                            className="flex-1 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-600 dark:border-gray-500"
+                            onKeyPress={(e) => e.key === 'Enter' && handleSaveBackup()}
+                        />
+                        <Button 
+                            onClick={handleSaveBackup}
+                            disabled={isLoadingBackups || !backupName.trim()}
+                        >
+                            <Icon icon="save" className="w-4 h-4 mr-2" />
+                            Yedekle
+                        </Button>
+                    </div>
+                </div>
+
+                {/* Mevcut Yedekler */}
+                <div>
+                    <h3 className="text-lg font-semibold mb-3">Kayıtlı Yedekler</h3>
+                    {isLoadingBackups ? (
+                        <div className="text-center py-4">Yükleniyor...</div>
+                    ) : backups.length === 0 ? (
+                        <div className="text-center py-4 text-gray-500">Henüz yedek bulunmuyor</div>
+                    ) : (
+                        <div className="space-y-2">
+                            {backups.map((backup) => (
+                                <div key={backup.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded">
+                                    <div>
+                                        <div className="font-medium">{backup.name}</div>
+                                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                                            {formatDate(backup.created_at)}
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <button
+                                            onClick={() => restoreBackup(backup)}
+                                            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
+                                        >
+                                            <Icon icon="download" className="w-4 h-4 mr-1 inline" />
+                                            Geri Yükle
+                                        </button>
+                                        <button
+                                            onClick={() => deleteBackup(backup.id)}
+                                            className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm"
+                                        >
+                                            <Icon icon="trash" className="w-4 h-4 mr-1 inline" />
+                                            Sil
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
 
 const PageLayout: FC<{children: ReactNode}> = ({ children }) => (
     <motion.div
