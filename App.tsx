@@ -2710,20 +2710,20 @@ const ReportsPage = () => {
         
         const title = `${getEntityName(reportType === 'class' ? 'classes' : 'teachers', selectedId)} Ders Programı`;
         
-        // Günlük başlık oluştur (gün adı + saat aralığı)
-        const dayHeaders = Array.from({ length: data.schoolInfo.daysInWeek }).map((_, dayIndex) => {
-            const dayLessons = dayLessonTimes[dayIndex] || [];
-            const startTime = dayLessons.length > 0 ? dayLessons[0].start : '';
-            const endTime = dayLessons.length > 0 ? dayLessons[dayLessons.length - 1].end : '';
-            const dayName = DAYS_OF_WEEK[dayIndex];
-            
-            if (startTime && endTime) {
-                return `${dayName}\n(${startTime}-${endTime})`;
-            }
-            return dayName;
-        });
+        // Hafta içi günler (Pazartesi-Cuma) ve hafta sonu ayrı başlıklar
+        const weekdayHeaders: string[] = [];
+        const weekendHeaders: string[] = [];
         
-        const headers = [['Saat', ...dayHeaders]];
+        for (let dayIndex = 0; dayIndex < data.schoolInfo.daysInWeek; dayIndex++) {
+            if (dayIndex < 5) { // Hafta içi (Pazartesi-Cuma)
+                weekdayHeaders.push(DAYS_OF_WEEK[dayIndex]);
+            } else { // Hafta sonu
+                weekendHeaders.push(DAYS_OF_WEEK[dayIndex]);
+            }
+        }
+        
+        // Başlık satırı: Hafta İçi + Hafta Sonu Saatleri + Hafta Sonu
+        const headers = [['Hafta İçi Saatleri', ...weekdayHeaders, 'Hafta Sonu Saatleri', ...weekendHeaders]];
         const body: string[][] = [];
         
         // Maksimum ders sayısını bul
@@ -2733,30 +2733,64 @@ const ReportsPage = () => {
         
         // Her ders saati için satır oluştur
         for (let hour = 0; hour < maxLessons; hour++) {
-            const row = [`${hour + 1}. Ders`];
+            // Hafta içi saatleri (Pazartesi'nin saatlerini referans al)
+            const weekdayTimeSlot = dayLessonTimes[0] && dayLessonTimes[0][hour] 
+                ? `${dayLessonTimes[0][hour].start}-${dayLessonTimes[0][hour].end}` 
+                : `${hour + 1}. Ders`;
             
-            for (let day = 0; day < data.schoolInfo.daysInWeek; day++) {
+            const row = [weekdayTimeSlot];
+            
+            // Hafta içi günler (Pazartesi-Cuma)
+            for (let day = 0; day < 5 && day < data.schoolInfo.daysInWeek; day++) {
                 const dayLessons = dayLessonTimes[day] || [];
                 
                 if (hour >= dayLessons.length) {
                     row.push(''); // Bu günde bu ders saati yok
                 } else {
-                    const lesson = dayLessons[hour];
                     const assignment = reportData.find(a => a.day === day && a.hour === hour);
                     
-                    let cellContent = `${lesson.start}-${lesson.end}`;
-                    
+                    let cellContent = '';
                     if (assignment) {
                         const lessonName = assignment.lessonName;
                         const counterpart = reportType === 'class'
                             ? getEntityName('teachers', assignment.teacherId)
                             : getEntityName('classes', assignment.classId);
-                        cellContent += `\n${lessonName}\n${counterpart}`;
+                        cellContent = `${lessonName}\n${counterpart}`;
                     }
                     
                     row.push(cellContent);
                 }
             }
+            
+            // Hafta sonu saatleri (Cumartesi'nin saatlerini referans al)
+            const weekendTimeSlot = data.schoolInfo.daysInWeek > 5 && dayLessonTimes[5] && dayLessonTimes[5][hour] 
+                ? `${dayLessonTimes[5][hour].start}-${dayLessonTimes[5][hour].end}` 
+                : `${hour + 1}. Ders`;
+            
+            row.push(weekendTimeSlot);
+            
+            // Hafta sonu günler (Cumartesi, Pazar)
+            for (let day = 5; day < data.schoolInfo.daysInWeek; day++) {
+                const dayLessons = dayLessonTimes[day] || [];
+                
+                if (hour >= dayLessons.length) {
+                    row.push(''); // Bu günde bu ders saati yok
+                } else {
+                    const assignment = reportData.find(a => a.day === day && a.hour === hour);
+                    
+                    let cellContent = '';
+                    if (assignment) {
+                        const lessonName = assignment.lessonName;
+                        const counterpart = reportType === 'class'
+                            ? getEntityName('teachers', assignment.teacherId)
+                            : getEntityName('classes', assignment.classId);
+                        cellContent = `${lessonName}\n${counterpart}`;
+                    }
+                    
+                    row.push(cellContent);
+                }
+            }
+            
             body.push(row);
         }
         
@@ -2886,12 +2920,6 @@ const ReportsPage = () => {
                                             <td className="p-2 border dark:border-gray-600 font-mono h-20 bg-gray-50 dark:bg-gray-800">
                                                 <div className="text-center">
                                                     <div className="font-bold">{hourIndex + 1}. Ders</div>
-                                                    {/* Hafta içi saatleri göster (Pazartesi'nin saatlerini referans al) */}
-                                                    {dayLessonTimes[0] && dayLessonTimes[0][hourIndex] && (
-                                                        <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                                            {dayLessonTimes[0][hourIndex].start} - {dayLessonTimes[0][hourIndex].end}
-                                                        </div>
-                                                    )}
                                                 </div>
                                             </td>
                                             {Array.from({ length: data.schoolInfo.daysInWeek }).map((_, dayIndex) => {
@@ -2903,12 +2931,6 @@ const ReportsPage = () => {
                                                         <td key="weekend-hours" className="p-2 border dark:border-gray-600 font-mono h-20 bg-yellow-100 dark:bg-yellow-900/30">
                                                             <div className="text-center">
                                                                 <div className="font-bold">{hourIndex + 1}. Ders</div>
-                                                                {/* Hafta sonu saatleri göster (Cumartesi'nin saatlerini referans al) */}
-                                                                {dayLessonTimes[5] && dayLessonTimes[5][hourIndex] && (
-                                                                    <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                                                                        {dayLessonTimes[5][hourIndex].start} - {dayLessonTimes[5][hourIndex].end}
-                                                                    </div>
-                                                                )}
                                                             </div>
                                                         </td>
                                                     );
@@ -2929,14 +2951,10 @@ const ReportsPage = () => {
                                                     const assignment = reportData.find(a => a.day === dayIndex && a.hour === hourIndex);
                                                     
                                                     elements.push(
-                                                        <td key={dayIndex} className={`p-2 border dark:border-gray-600 align-top text-sm ${isWeekend ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}`}>
-                                                            {/* Ders saati bilgisi */}
-                                                            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 font-mono">
-                                                                {lesson.start} - {lesson.end}
-                                                            </div>
+                                                        <td key={dayIndex} className={`p-2 border dark:border-gray-600 align-top text-sm h-20 ${isWeekend ? 'bg-yellow-50 dark:bg-yellow-900/20' : ''}`}>
                                                             {/* Atanan ders */}
                                                             {assignment && (
-                                                                 <div className="bg-blue-100 dark:bg-blue-900/50 p-2 rounded-lg text-left">
+                                                                 <div className="bg-blue-100 dark:bg-blue-900/50 p-2 rounded-lg text-left h-full flex flex-col justify-center">
                                                                     <p className="font-bold">{assignment.lessonName}</p>
                                                                     <p>{reportType === 'class' ? getEntityName('teachers', assignment.teacherId) : getEntityName('classes', assignment.classId)}</p>
                                                                     {assignment.classroomId && <p className="text-xs text-gray-500">{getEntityName('classrooms', assignment.classroomId)}</p>}
