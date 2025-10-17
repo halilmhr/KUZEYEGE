@@ -1826,6 +1826,29 @@ const AssignmentsPage = () => {
             hour: targetHour
         };
 
+        // Sınıf müsaitlik kontrolü
+        const targetClass = data.classes.find(c => c.id === targetClassId);
+        const teacher = data.teachers.find(t => t.id === draggedAssignment.teacherId);
+        
+        const getAvailabilityStatus = (entity: typeof targetClass | typeof teacher, day: number, hour: number) =>
+            entity?.availability?.[day]?.[hour] || AvailabilityStatus.AVAILABLE;
+
+        const classAvailability = getAvailabilityStatus(targetClass, targetDay, targetHour);
+        const teacherAvailability = getAvailabilityStatus(teacher, targetDay, targetHour);
+
+        // Müsait olmayan slotlara atama yapılmasını engelle
+        if (classAvailability === AvailabilityStatus.UNAVAILABLE) {
+            alert(`❌ ATAMA ENGELLENEDI!\n\nSeçilen sınıf "${targetClass?.name}" bu saatte (${DAYS_OF_WEEK[targetDay]} ${targetHour + 1}. Ders) müsait değil.\n\nLütfen sınıfın müsaitlik tablosunu kontrol edin.`);
+            setDraggedItem(null);
+            return;
+        }
+
+        if (teacherAvailability === AvailabilityStatus.UNAVAILABLE) {
+            alert(`❌ ATAMA ENGELLENEDI!\n\nSeçilen öğretmen "${teacher?.name}" bu saatte (${DAYS_OF_WEEK[targetDay]} ${targetHour + 1}. Ders) müsait değil.\n\nLütfen öğretmenin müsaitlik tablosunu kontrol edin.`);
+            setDraggedItem(null);
+            return;
+        }
+
         // Çakışma kontrolü - mevcut atamaları filtrele (sürüklenen ve hedef hariç)
         const otherAssignments = data.assignments.filter(a => 
             a.id !== draggedItem.assignmentId && 
@@ -1865,13 +1888,32 @@ const AssignmentsPage = () => {
         }
 
         if (targetAssignment) {
-            // Swap işlemi için hedef dersin de çakışma kontrolü
+            // Swap işlemi için hedef dersin de müsaitlik kontrolü
             const tempSwapAssignment: Omit<Assignment, 'id'> = {
                 ...targetAssignment,
                 classId: draggedItem.sourceClassId,
                 day: draggedItem.sourceDay,
                 hour: draggedItem.sourceHour
             };
+
+            // Swap edilecek dersin yeni konumundaki müsaitlik kontrolü
+            const swapTargetClass = data.classes.find(c => c.id === draggedItem.sourceClassId);
+            const swapTeacher = data.teachers.find(t => t.id === targetAssignment.teacherId);
+            
+            const swapClassAvailability = getAvailabilityStatus(swapTargetClass, draggedItem.sourceDay, draggedItem.sourceHour);
+            const swapTeacherAvailability = getAvailabilityStatus(swapTeacher, draggedItem.sourceDay, draggedItem.sourceHour);
+
+            if (swapClassAvailability === AvailabilityStatus.UNAVAILABLE) {
+                alert(`❌ YER DEĞİŞTİRME ENGELLENEDI!\n\nSınıf "${swapTargetClass?.name}" hedef saatte (${DAYS_OF_WEEK[draggedItem.sourceDay]} ${draggedItem.sourceHour + 1}. Ders) müsait değil.\n\nLütfen sınıfın müsaitlik tablosunu kontrol edin.`);
+                setDraggedItem(null);
+                return;
+            }
+
+            if (swapTeacherAvailability === AvailabilityStatus.UNAVAILABLE) {
+                alert(`❌ YER DEĞİŞTİRME ENGELLENEDI!\n\nÖğretmen "${swapTeacher?.name}" hedef saatte (${DAYS_OF_WEEK[draggedItem.sourceDay]} ${draggedItem.sourceHour + 1}. Ders) müsait değil.\n\nLütfen öğretmenin müsaitlik tablosunu kontrol edin.`);
+                setDraggedItem(null);
+                return;
+            }
 
             const swapConflict = checkConflict(tempSwapAssignment, otherAssignments);
 
@@ -2567,10 +2609,14 @@ const AssignmentsPage = () => {
                                                     } else {
                                                         const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
                                                         
+                                                        // Sınıf müsaitlik kontrolü
+                                                        const classAvailability = c.availability?.[dayIndex]?.[hourIndex] || AvailabilityStatus.AVAILABLE;
+                                                        const isClassUnavailable = classAvailability === AvailabilityStatus.UNAVAILABLE;
+                                                        
                                                         // Boş hücre için çakışma ve kural kontrolü
                                                         let hasConflict = false;
                                                         let hasRuleViolation = false;
-                                                        if (isDraggedOver && draggedItem) {
+                                                        if (isDraggedOver && draggedItem && !isClassUnavailable) {
                                                             const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
                                                             if (draggedAssignment) {
                                                                 const tempAssignment: Omit<Assignment, 'id'> = {
@@ -2590,24 +2636,32 @@ const AssignmentsPage = () => {
                                                             <td 
                                                                 key={c.id} 
                                                                 className={`p-1 border dark:border-gray-300 dark:border-gray-600 align-middle h-12 transition-all ${
-                                                                    isDraggedOver 
-                                                                        ? hasConflict 
-                                                                            ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
-                                                                            : hasRuleViolation
-                                                                                ? 'ring-2 ring-yellow-400 bg-yellow-50 dark:bg-yellow-900/30'
-                                                                                : 'ring-2 ring-green-400 bg-green-50 dark:bg-green-900/30'
-                                                                        : ''
+                                                                    isClassUnavailable 
+                                                                        ? 'bg-red-100 dark:bg-red-900/20' 
+                                                                        : isDraggedOver 
+                                                                            ? hasConflict 
+                                                                                ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
+                                                                                : hasRuleViolation
+                                                                                    ? 'ring-2 ring-yellow-400 bg-yellow-50 dark:bg-yellow-900/30'
+                                                                                    : 'ring-2 ring-green-400 bg-green-50 dark:bg-green-900/30'
+                                                                            : ''
                                                                 }`}
-                                                                onDragOver={(e) => handleDragOver(e, c.id, dayIndex, hourIndex)}
-                                                                onDragLeave={handleDragLeave}
-                                                                onDrop={(e) => handleDrop(e, c.id, dayIndex, hourIndex)}
+                                                                onDragOver={!isClassUnavailable ? (e) => handleDragOver(e, c.id, dayIndex, hourIndex) : undefined}
+                                                                onDragLeave={!isClassUnavailable ? handleDragLeave : undefined}
+                                                                onDrop={!isClassUnavailable ? (e) => handleDrop(e, c.id, dayIndex, hourIndex) : undefined}
                                                             >
-                                                                <button 
-                                                                    onClick={() => handleOpenManualModal(dayIndex, hourIndex, c.id)} 
-                                                                    className="w-full h-full flex flex-col items-center justify-center text-gray-300 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-md transition-colors"
-                                                                >
-                                                                    <Icon icon="plus" className="w-4 h-4"/>
-                                                                </button>
+                                                                {!isClassUnavailable ? (
+                                                                    <button 
+                                                                        onClick={() => handleOpenManualModal(dayIndex, hourIndex, c.id)} 
+                                                                        className="w-full h-full flex flex-col items-center justify-center text-gray-300 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-md transition-colors"
+                                                                    >
+                                                                        <Icon icon="plus" className="w-4 h-4"/>
+                                                                    </button>
+                                                                ) : (
+                                                                    <div className="w-full h-full flex flex-col items-center justify-center text-red-400 dark:text-red-500">
+                                                                        <Icon icon="x" className="w-4 h-4"/>
+                                                                    </div>
+                                                                )}
                                                             </td>
                                                         );
                                                     }
