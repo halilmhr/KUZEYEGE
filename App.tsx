@@ -508,7 +508,9 @@ const Sidebar: FC<{
     setMobileOpen: (open: boolean) => void;
     isCollapsed: boolean;
     setCollapsed: (collapsed: boolean) => void;
-}> = ({ isMobileOpen, setMobileOpen, isCollapsed, setCollapsed }) => {
+    onBackup: () => void;
+    onReset: () => void;
+}> = ({ isMobileOpen, setMobileOpen, isCollapsed, setCollapsed, onBackup, onReset }) => {
     const navItems = [
         { path: '/', label: 'Anasayfa', icon: 'home' },
         { path: '/info', label: 'Genel Bilgiler', icon: 'info' },
@@ -524,7 +526,7 @@ const Sidebar: FC<{
             to={path}
             onClick={onClick}
             className={({ isActive }) =>
-                `flex items-center ${isCollapsed ? 'justify-center' : 'gap-4'} px-4 py-3 rounded-lg text-lg transition-colors ${
+                `flex items-center ${isCollapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg text-sm transition-colors ${
                     isActive
                         ? 'bg-blue-600 text-white font-semibold'
                         : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
@@ -532,16 +534,16 @@ const Sidebar: FC<{
             }
             title={isCollapsed ? label : undefined}
         >
-            <Icon icon={icon} className="w-6 h-6" />
-            {!isCollapsed && <span>{label}</span>}
+            <Icon icon={icon} className="w-5 h-5" />
+            {!isCollapsed && <span className="text-sm">{label}</span>}
         </NavLink>
     );
 
     return (
         <>
             <aside className={`fixed top-0 left-0 h-full bg-white dark:bg-gray-800 ${isMobileOpen ? 'w-64' : isCollapsed ? 'w-16' : 'w-64'} shadow-lg z-30 transform transition-all duration-300 md:translate-x-0 ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-                <div className={`p-6 border-b border-gray-200 dark:border-gray-700 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
-                    {!isCollapsed && <h1 className="text-xl font-bold text-blue-600 dark:text-blue-400">Ders Planlama</h1>}
+                <div className={`p-4 border-b border-gray-200 dark:border-gray-700 flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
+                    {!isCollapsed && <h1 className="text-base font-bold text-blue-600 dark:text-blue-400">Ders Planlama</h1>}
                     <button
                         onClick={() => setCollapsed(!isCollapsed)}
                         className="hidden md:flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
@@ -550,9 +552,25 @@ const Sidebar: FC<{
                         <Icon icon={isCollapsed ? 'chevron-right' : 'chevron-left'} className="w-4 h-4" />
                     </button>
                 </div>
-                <nav className="p-4 flex flex-col gap-2">
+                <nav className="p-2 flex flex-col gap-1">
                     {navItems.map(item => <NavItem key={item.path} {...item} onClick={() => setMobileOpen(false)} />)}
                 </nav>
+                <div className="border-t border-gray-200 dark:border-gray-700 mt-auto pt-3 px-3 flex flex-col gap-2">
+                    <button 
+                        onClick={onBackup}
+                        className="w-full flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white rounded-lg transition-all duration-200 shadow-md hover:shadow-lg text-xs font-medium"
+                    >
+                        <Icon icon="database" className="w-4 h-4" />
+                        <span>Yedekle</span>
+                    </button>
+                    <button 
+                        onClick={onReset}
+                        className="w-full flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white rounded-lg transition-all duration-200 shadow-md hover:shadow-lg text-xs font-medium"
+                    >
+                        <Icon icon="refresh" className="w-4 h-4" />
+                        <span>Yeniden Başlat</span>
+                    </button>
+                </div>
             </aside>
             {isMobileOpen && <div className="fixed inset-0 bg-black/30 z-20 md:hidden" onClick={() => setMobileOpen(false)}></div>}
         </>
@@ -590,14 +608,6 @@ const Header: FC<{ onMenuClick: () => void }> = ({ onMenuClick }) => {
                 <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200">{pageTitles[location.pathname] || 'Ders Planlama'}</h2>
             </div>
             <div className="flex items-center gap-4">
-                <Button onClick={() => setBackupModalOpen(true)} variant="secondary">
-                    <Icon icon="database" className="w-5 h-5" />
-                    <span className="hidden sm:inline">Yedekle</span>
-                </Button>
-                <Button onClick={handleReset} variant="danger">
-                    <Icon icon="refresh" className="w-5 h-5" />
-                    <span className="hidden sm:inline">Yeniden Başlat</span>
-                </Button>
                 <IconButton
                     icon={theme === 'dark' ? 'sun' : 'moon'}
                     label="Toggle Theme"
@@ -1462,6 +1472,7 @@ const AssignmentsPage = () => {
         day: number;
         hour: number;
     } | null>(null);
+    const [showRequirementsList, setShowRequirementsList] = useState(false);
 
     // --- Color Generation Logic ---
     const COLORS = useMemo(() => [
@@ -2428,20 +2439,34 @@ const AssignmentsPage = () => {
     }, [allRequirements]);
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-3 flex flex-col h-full">
             <Card>
                 <h2 className="text-lg font-semibold mb-4">Otomatik Atama</h2>
                  <p className="mb-4 text-sm text-gray-600 dark:text-gray-400">
                     Aşağıda, sınıfların müfredatlarına göre atanması gereken tüm derslerin bir özeti bulunmaktadır. Atamayı başlatmak için butona tıklayın. Ders gereksinimlerini değiştirmek için lütfen 'Sınıflar' sayfasına gidin.
                 </p>
                 {requirementsSummary.length > 0 ? (
-                    <div className="mt-6 space-y-2 max-h-60 overflow-y-auto pr-2">
-                        <h3 className="font-semibold">Atanacak Ders Grupları:</h3>
-                        {requirementsSummary.map(g => (
-                            <div key={g.id} className="flex justify-between items-center p-2 bg-gray-100 dark:bg-gray-700 rounded">
-                                <span><b>{g.hours} saat</b> - {getEntityName('classes', g.classId)} - {g.lessonName} - {getEntityName('teachers', g.teacherId)}</span>
+                    <div className="mt-6 space-y-2">
+                        <button 
+                            onClick={() => setShowRequirementsList(!showRequirementsList)}
+                            className="w-full flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/30 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                        >
+                            <h3 className="font-semibold text-blue-900 dark:text-blue-100">
+                                {showRequirementsList ? '▼' : '▶'} Atanacak Ders Grupları ({requirementsSummary.length})
+                            </h3>
+                            <span className="text-sm text-blue-700 dark:text-blue-300">
+                                {showRequirementsList ? 'Gizle' : 'Göster'}
+                            </span>
+                        </button>
+                        {showRequirementsList && (
+                            <div className="max-h-60 overflow-y-auto pr-2 space-y-2 bg-gray-50 dark:bg-gray-800/50 p-3 rounded-lg">
+                                {requirementsSummary.map(g => (
+                                    <div key={g.id} className="flex justify-between items-center p-2 bg-white dark:bg-gray-700 rounded border border-gray-200 dark:border-gray-600 hover:bg-blue-50 dark:hover:bg-gray-600 transition-colors">
+                                        <span><b>{g.hours} saat</b> - {getEntityName('classes', g.classId)} - {g.lessonName} - {getEntityName('teachers', g.teacherId)}</span>
+                                    </div>
+                                ))}
                             </div>
-                        ))}
+                        )}
                     </div>
                 ) : (
                     <p className="text-center text-gray-500 dark:text-gray-400 py-4">Atanacak ders gereksinimi bulunmuyor.</p>
@@ -2472,208 +2497,204 @@ const AssignmentsPage = () => {
                     <p>• <Icon icon="plus" className="w-3 h-3 inline" /> Manuel ders ekleme hala mümkün</p>
                 </div>
             </div>
-            <div className="overflow-x-auto bg-white dark:bg-gray-800 p-3 rounded-lg shadow-md">
-                <table className="w-full border-collapse text-center text-sm">
-                    <thead>
-                        <tr>
-                            <th className="p-1 border dark:border-gray-300 dark:border-gray-600 w-20 text-xs">Gün</th>
-                            <th className="p-1 border dark:border-gray-300 dark:border-gray-600 w-24 text-xs">Saat</th>
-                            {data.classes.map(c => (
-                                <th key={c.id} className="p-1 border dark:border-gray-300 dark:border-gray-600 font-semibold text-xs min-w-[80px]">{c.name}</th>
-                            ))}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {Array.from({ length: data.schoolInfo.daysInWeek }).map((_, dayIndex) => (
-                            <Fragment key={dayIndex}>
-                                {(() => {
-                                    const dayLessons = dayLessonTimes[dayIndex] || [];
-                                    return dayLessons.map((lessonTime, hourIndex) => {
-                                        return (
-                                            <tr key={`${dayIndex}-${hourIndex}`} className="h-12">
-                                                {hourIndex === 0 && (
-                                                    <td rowSpan={dayLessons.length} className="p-1 border dark:border-gray-300 dark:border-gray-600 font-bold align-middle text-xs">
-                                                        {DAYS_OF_WEEK[dayIndex]}
-                                                    </td>
-                                                )}
-                                                <td className="p-1 border dark:border-gray-300 dark:border-gray-600 font-mono text-xs whitespace-pre-wrap">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md flex flex-col flex-grow">
+                <div className="flex justify-between items-center p-3 border-b border-gray-200 dark:border-gray-600">
+                    <h3 className="text-lg font-semibold">Ders Atama Tablosu</h3>
+                    <button 
+                        onClick={() => {
+                            const element = document.querySelector('.scroll-smooth');
+                            if (element) element.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className="px-3 py-1 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/70 transition-colors text-sm"
+                    >
+                        ↑ Üste Çık
+                    </button>
+                </div>
+                <div className="overflow-auto flex-grow border border-gray-200 dark:border-gray-600 rounded-lg scroll-smooth">
+                    <table className="w-full border-collapse text-center text-sm">
+                        <thead className="sticky top-0 bg-gray-50 dark:bg-gray-700 z-20 shadow-sm">
+                            <tr>
+                                <th className="p-2 border dark:border-gray-300 dark:border-gray-600 w-24 text-xs font-semibold bg-gray-50 dark:bg-gray-700 sticky left-0 z-30">Saat</th>
+                                {Array.from({ length: data.schoolInfo.daysInWeek }).map((_, dayIndex) => (
+                                    <th key={`day-${dayIndex}`} className="p-2 border dark:border-gray-300 dark:border-gray-600 text-xs font-semibold bg-blue-50 dark:bg-blue-900/50" colSpan={data.classes.length}>
+                                        {DAYS_OF_WEEK[dayIndex]}
+                                    </th>
+                                ))}
+                            </tr>
+                            <tr>
+                                <th className="p-2 border dark:border-gray-300 dark:border-gray-600 text-xs font-semibold bg-gray-50 dark:bg-gray-700 sticky left-0 z-30"></th>
+                                {Array.from({ length: data.schoolInfo.daysInWeek }).map((_, dayIndex) => 
+                                    data.classes.map(c => (
+                                        <th key={`${dayIndex}-${c.id}`} className="p-2 border dark:border-gray-300 dark:border-gray-600 font-semibold text-xs min-w-[80px] bg-gray-50 dark:bg-gray-700">
+                                            {c.name}
+                                        </th>
+                                    ))
+                                )}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {(() => {
+                                // Maksimum ders sayısını bul
+                                const maxLessons = Math.max(...Array.from({ length: data.schoolInfo.daysInWeek }, (_, dayIndex) => 
+                                    (dayLessonTimes[dayIndex] || []).length
+                                ));
+                                
+                                return Array.from({ length: maxLessons }).map((_, hourIndex) => (
+                                    <tr key={`hour-${hourIndex}`} className="h-16 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                                        {/* Saat sütunu */}
+                                        <td className="p-2 border dark:border-gray-300 dark:border-gray-600 font-mono text-xs bg-gray-50 dark:bg-gray-700 sticky left-0 z-10">
+                                            {(() => {
+                                                // İlk günün bu saatindeki zamanı al (genelde hepsi aynı)
+                                                const firstDayLesson = dayLessonTimes[0]?.[hourIndex];
+                                                return firstDayLesson ? (
                                                     <span className="text-xs leading-tight">
-                                                        {lessonTime.start}<br/>-<br/>{lessonTime.end}
+                                                        {firstDayLesson.start}<br/>-<br/>{firstDayLesson.end}
                                                     </span>
-                                                </td>
-                                                {data.classes.map(c => {
-                                                    const assignment = assignmentsByClassSlot.get(`${c.id}-${dayIndex}-${hourIndex}`);
+                                                ) : (
+                                                    <span className="text-xs text-gray-400">{hourIndex + 1}. Ders</span>
+                                                );
+                                            })()}
+                                        </td>
+                                        
+                                        {/* Her gün için sınıf hücreleri */}
+                                        {Array.from({ length: data.schoolInfo.daysInWeek }).map((_, dayIndex) => 
+                                            data.classes.map(c => {
+                                                const dayLessons = dayLessonTimes[dayIndex] || [];
+                                                
+                                                // Bu günde bu ders saati var mı?
+                                                if (hourIndex >= dayLessons.length) {
+                                                    return <td key={`${dayIndex}-${c.id}`} className="p-1 border dark:border-gray-300 dark:border-gray-600 align-middle bg-gray-100 dark:bg-gray-800 h-16" />;
+                                                }
+                                                
+                                                const assignment = assignmentsByClassSlot.get(`${c.id}-${dayIndex}-${hourIndex}`);
+                                                
+                                                // Sınıfın çalışma saatlerini kontrol et
+                                                let classStartHour = 0;
+                                                let classEndHour = 0;
+                                                
+                                                if (c.availability) {
+                                                    let minHour = Infinity;
+                                                    let maxHour = -1;
                                                     
-                                                    // Sınıfın çalışma saatlerini müsaitlik tablosuna göre otomatik hesapla
-                                                    let classStartHour = 0;
-                                                    let classEndHour = 0;
-                                                    
-                                                    if (c.availability) {
-                                                        let minHour = Infinity;
-                                                        let maxHour = -1;
-                                                        
-                                                        for (let day = 0; day < data.schoolInfo.daysInWeek; day++) {
-                                                            const dayLessonsForCalc = dayLessonTimes[day] || [];
-                                                            for (let hour = 0; hour < dayLessonsForCalc.length; hour++) {
-                                                                const status = c.availability?.[day]?.[hour] || AvailabilityStatus.AVAILABLE;
-                                                                if (status !== AvailabilityStatus.UNAVAILABLE) {
-                                                                    minHour = Math.min(minHour, hour);
-                                                                    maxHour = Math.max(maxHour, hour);
-                                                                }
+                                                    for (let day = 0; day < data.schoolInfo.daysInWeek; day++) {
+                                                        const dayLessonsForCalc = dayLessonTimes[day] || [];
+                                                        for (let hour = 0; hour < dayLessonsForCalc.length; hour++) {
+                                                            const status = c.availability?.[day]?.[hour] || AvailabilityStatus.AVAILABLE;
+                                                            if (status !== AvailabilityStatus.UNAVAILABLE) {
+                                                                minHour = Math.min(minHour, hour);
+                                                                maxHour = Math.max(maxHour, hour);
                                                             }
                                                         }
-                                                        
-                                                        if (maxHour >= 0) {
-                                                            classStartHour = minHour;
-                                                            classEndHour = maxHour;
-                                                        }
-                                                    } else {
-                                                        // Availability yoksa varsayılan değerleri kullan
-                                                        const allDayLessonCounts = Array.from({ length: data.schoolInfo.daysInWeek }, (_, dayIdx) => 
-                                                            (dayLessonTimes[dayIdx] || []).length
-                                                        );
-                                                        const maxLessonsAnyDay = Math.max(...allDayLessonCounts, 0);
-                                                        classStartHour = c.startHour ?? 0;
-                                                        classEndHour = c.endHour ?? (maxLessonsAnyDay > 0 ? maxLessonsAnyDay - 1 : 7);
                                                     }
                                                     
-                                                    const isWithinClassHours = hourIndex >= classStartHour && hourIndex <= classEndHour;
-
-                                                    if (!isWithinClassHours) {
-                                                        return <td key={c.id} className="p-0.5 border dark:border-gray-300 dark:border-gray-600 align-middle bg-gray-50 dark:bg-gray-900/50 h-12" />;
+                                                    if (maxHour >= 0) {
+                                                        classStartHour = minHour;
+                                                        classEndHour = maxHour;
                                                     }
+                                                } else {
+                                                    const allDayLessonCounts = Array.from({ length: data.schoolInfo.daysInWeek }, (_, dayIdx) => 
+                                                        (dayLessonTimes[dayIdx] || []).length
+                                                    );
+                                                    const maxLessonsAnyDay = Math.max(...allDayLessonCounts, 0);
+                                                    classStartHour = c.startHour ?? 0;
+                                                    classEndHour = c.endHour ?? (maxLessonsAnyDay > 0 ? maxLessonsAnyDay - 1 : 7);
+                                                }
+                                                
+                                                const isWithinClassHours = hourIndex >= classStartHour && hourIndex <= classEndHour;
+                                                
+                                                if (!isWithinClassHours) {
+                                                    return <td key={`${dayIndex}-${c.id}`} className="p-1 border dark:border-gray-300 dark:border-gray-600 align-middle bg-gray-50 dark:bg-gray-900/50 h-16" />;
+                                                }
+                                                
+                                                if (assignment) {
+                                                    const bgColor = getLessonColor(assignment.lessonName);
+                                                    const textColor = getTextColorForBg(bgColor);
+                                                    const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
+                                                    const isDragged = draggedItem?.sourceClassId === c.id && draggedItem?.sourceDay === dayIndex && draggedItem?.sourceHour === hourIndex;
                                                     
-                                                    if (assignment) {
-                                                        const bgColor = getLessonColor(assignment.lessonName);
-                                                        const textColor = getTextColorForBg(bgColor);
-                                                        const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
-                                                        const isDragged = draggedItem?.sourceClassId === c.id && draggedItem?.sourceDay === dayIndex && draggedItem?.sourceHour === hourIndex;
-                                                        
-                                                        // Çakışma ve kural kontrolü
-                                                        let hasConflict = false;
-                                                        let hasRuleViolation = false;
-                                                        if (isDraggedOver && draggedItem && draggedItem.assignmentId !== assignment.id) {
-                                                            const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
-                                                            if (draggedAssignment) {
-                                                                const tempAssignment: Omit<Assignment, 'id'> = {
-                                                                    ...draggedAssignment,
-                                                                    classId: c.id,
-                                                                    day: dayIndex,
-                                                                    hour: hourIndex
-                                                                };
-                                                                const otherAssignments = data.assignments.filter(a => 
-                                                                    a.id !== draggedItem.assignmentId && a.id !== assignment.id
-                                                                );
-                                                                hasConflict = !!checkConflict(tempAssignment, otherAssignments);
-                                                                const consecutiveCheck = checkConsecutiveLessonsRule(tempAssignment, otherAssignments);
-                                                                hasRuleViolation = !consecutiveCheck.isValid;
-                                                            }
-                                                        }
-                                                        
-                                                        return (
-                                                            <td 
-                                                                key={c.id} 
-                                                                className={`p-1 border dark:border-gray-300 dark:border-gray-600 align-middle relative group cursor-move select-none h-12 transition-all ${
-                                                                    isDraggedOver 
-                                                                        ? hasConflict 
-                                                                            ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
-                                                                            : hasRuleViolation
-                                                                            ? 'ring-2 ring-yellow-400 bg-yellow-50 dark:bg-yellow-900/30'
-                                                                            : 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/30'
+                                                    return (
+                                                        <td 
+                                                            key={`${dayIndex}-${c.id}`}
+                                                            className={`p-2 border dark:border-gray-300 dark:border-gray-600 align-middle relative group cursor-move select-none h-16 transition-all ${
+                                                                isDraggedOver ? 'ring-2 ring-blue-400 bg-blue-50 dark:bg-blue-900/30' : ''
+                                                            } ${isDragged ? 'opacity-50' : ''}`}
+                                                            style={{ backgroundColor: isDraggedOver ? undefined : bgColor, color: isDraggedOver ? undefined : textColor }}
+                                                            draggable={true}
+                                                            onDragStart={(e) => handleDragStart(e, assignment, c.id, dayIndex, hourIndex)}
+                                                            onDragOver={(e) => handleDragOver(e, c.id, dayIndex, hourIndex)}
+                                                            onDragLeave={handleDragLeave}
+                                                            onDrop={(e) => handleDrop(e, c.id, dayIndex, hourIndex)}
+                                                            onDragEnd={handleDragEnd}
+                                                        >
+                                                            <div className="flex flex-col items-center justify-center text-center text-xs">
+                                                                <p className="font-bold leading-tight">{assignment.lessonName}</p>
+                                                                <p className="text-xs opacity-80">({getEntityName('teachers', assignment.teacherId)})</p>
+                                                            </div>
+                                                            <button 
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handleDelete(c.id, dayIndex, hourIndex);
+                                                                }} 
+                                                                className="absolute top-0.5 right-0.5 text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 bg-white/80 rounded-full hover:bg-white" 
+                                                                aria-label="Sil"
+                                                            >
+                                                                <Icon icon="trash" className="w-3 h-3" />
+                                                            </button>
+                                                        </td>
+                                                    );
+                                                } else {
+                                                    const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
+                                                    const classAvailability = c.availability?.[dayIndex]?.[hourIndex] || AvailabilityStatus.AVAILABLE;
+                                                    const isClassUnavailable = classAvailability === AvailabilityStatus.UNAVAILABLE;
+                                                    
+                                                    return (
+                                                        <td 
+                                                            key={`${dayIndex}-${c.id}`}
+                                                            className={`p-2 border dark:border-gray-300 dark:border-gray-600 align-middle h-16 transition-all ${
+                                                                isClassUnavailable 
+                                                                    ? 'bg-red-100 dark:bg-red-900/20' 
+                                                                    : isDraggedOver 
+                                                                        ? 'ring-2 ring-green-400 bg-green-50 dark:bg-green-900/30'
                                                                         : ''
-                                                                } ${isDragged ? 'opacity-50' : ''}`}
-                                                                style={{ backgroundColor: isDraggedOver ? undefined : bgColor, color: isDraggedOver ? undefined : textColor }}
-                                                                draggable={true}
-                                                                onDragStart={(e) => handleDragStart(e, assignment, c.id, dayIndex, hourIndex)}
-                                                                onDragOver={(e) => handleDragOver(e, c.id, dayIndex, hourIndex)}
-                                                                onDragLeave={handleDragLeave}
-                                                                onDrop={(e) => handleDrop(e, c.id, dayIndex, hourIndex)}
-                                                                onDragEnd={handleDragEnd}
-                                                            >
-                                                                <div className="flex flex-col items-center justify-center text-center text-xs">
-                                                                    <p className="font-bold leading-tight">{assignment.lessonName}</p>
-                                                                    <p className="text-xs opacity-80">({getEntityName('teachers', assignment.teacherId)})</p>
-                                                                </div>
+                                                            }`}
+                                                            onDragOver={!isClassUnavailable ? (e) => handleDragOver(e, c.id, dayIndex, hourIndex) : undefined}
+                                                            onDragLeave={!isClassUnavailable ? handleDragLeave : undefined}
+                                                            onDrop={!isClassUnavailable ? (e) => handleDrop(e, c.id, dayIndex, hourIndex) : undefined}
+                                                        >
+                                                            {!isClassUnavailable ? (
                                                                 <button 
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        handleDelete(c.id, dayIndex, hourIndex);
-                                                                    }} 
-                                                                    className="absolute top-0.5 right-0.5 text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-0.5 bg-white/80 rounded-full hover:bg-white" 
-                                                                    aria-label="Sil"
+                                                                    onClick={() => handleOpenManualModal(dayIndex, hourIndex, c.id)} 
+                                                                    className="w-full h-full flex flex-col items-center justify-center text-gray-300 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-md transition-colors"
                                                                 >
-                                                                    <Icon icon="trash" className="w-3 h-3" />
+                                                                    <Icon icon="plus" className="w-4 h-4"/>
                                                                 </button>
-                                                            </td>
-                                                        );
-                                                    } else {
-                                                        const isDraggedOver = dragOverCell?.classId === c.id && dragOverCell?.day === dayIndex && dragOverCell?.hour === hourIndex;
-                                                        
-                                                        // Sınıf müsaitlik kontrolü
-                                                        const classAvailability = c.availability?.[dayIndex]?.[hourIndex] || AvailabilityStatus.AVAILABLE;
-                                                        const isClassUnavailable = classAvailability === AvailabilityStatus.UNAVAILABLE;
-                                                        
-                                                        // Boş hücre için çakışma ve kural kontrolü
-                                                        let hasConflict = false;
-                                                        let hasRuleViolation = false;
-                                                        if (isDraggedOver && draggedItem && !isClassUnavailable) {
-                                                            const draggedAssignment = data.assignments.find(a => a.id === draggedItem.assignmentId);
-                                                            if (draggedAssignment) {
-                                                                const tempAssignment: Omit<Assignment, 'id'> = {
-                                                                    ...draggedAssignment,
-                                                                    classId: c.id,
-                                                                    day: dayIndex,
-                                                                    hour: hourIndex
-                                                                };
-                                                                const otherAssignments = data.assignments.filter(a => a.id !== draggedItem.assignmentId);
-                                                                hasConflict = !!checkConflict(tempAssignment, otherAssignments);
-                                                                const consecutiveCheck = checkConsecutiveLessonsRule(tempAssignment, otherAssignments);
-                                                                hasRuleViolation = !consecutiveCheck.isValid;
-                                                            }
-                                                        }
-                                                        
-                                                        return (
-                                                            <td 
-                                                                key={c.id} 
-                                                                className={`p-1 border dark:border-gray-300 dark:border-gray-600 align-middle h-12 transition-all ${
-                                                                    isClassUnavailable 
-                                                                        ? 'bg-red-100 dark:bg-red-900/20' 
-                                                                        : isDraggedOver 
-                                                                            ? hasConflict 
-                                                                                ? 'ring-2 ring-red-400 bg-red-50 dark:bg-red-900/30' 
-                                                                                : hasRuleViolation
-                                                                                    ? 'ring-2 ring-yellow-400 bg-yellow-50 dark:bg-yellow-900/30'
-                                                                                    : 'ring-2 ring-green-400 bg-green-50 dark:bg-green-900/30'
-                                                                            : ''
-                                                                }`}
-                                                                onDragOver={!isClassUnavailable ? (e) => handleDragOver(e, c.id, dayIndex, hourIndex) : undefined}
-                                                                onDragLeave={!isClassUnavailable ? handleDragLeave : undefined}
-                                                                onDrop={!isClassUnavailable ? (e) => handleDrop(e, c.id, dayIndex, hourIndex) : undefined}
-                                                            >
-                                                                {!isClassUnavailable ? (
-                                                                    <button 
-                                                                        onClick={() => handleOpenManualModal(dayIndex, hourIndex, c.id)} 
-                                                                        className="w-full h-full flex flex-col items-center justify-center text-gray-300 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-md transition-colors"
-                                                                    >
-                                                                        <Icon icon="plus" className="w-4 h-4"/>
-                                                                    </button>
-                                                                ) : (
-                                                                    <div className="w-full h-full flex flex-col items-center justify-center text-red-400 dark:text-red-500">
-                                                                        <Icon icon="x" className="w-4 h-4"/>
-                                                                    </div>
-                                                                )}
-                                                            </td>
-                                                        );
-                                                    }
-                                                })}
-                                            </tr>
-                                        );
-                                    });
-                                })()}
-                            </Fragment>
-                        ))}
-                    </tbody>
+                                                            ) : (
+                                                                <div className="w-full h-full flex flex-col items-center justify-center text-red-400 dark:text-red-500">
+                                                                    <Icon icon="x" className="w-4 h-4"/>
+                                                                </div>
+                                                            )}
+                                                        </td>
+                                                    );
+                                                }
+                                            })
+                                        )}
+                                    </tr>
+                                ));
+                            })()}
+                        </tbody>
                 </table>
+                </div>
+                <div className="p-4 border-t border-gray-200 dark:border-gray-600 text-center">
+                    <button 
+                        onClick={() => {
+                            const element = document.querySelector('.scroll-smooth');
+                            if (element) element.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                        className="px-4 py-2 bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 rounded-lg hover:bg-blue-200 dark:hover:bg-blue-900/70 transition-colors text-sm font-medium"
+                    >
+                        ↑ Tablonun Başına Dön
+                    </button>
+                </div>
             </div>
             
             <Modal isOpen={isManualAssignModalOpen} onClose={handleCloseManualModal} title={`Ders Ata (${selectedSlot ? `${getEntityName('classes', assignmentForm.classId || '')} - ${DAYS_OF_WEEK[selectedSlot.day]}, ${lessonTimes[selectedSlot.hour]?.label}` : ''})`}>
@@ -3055,14 +3076,33 @@ export default function App() {
   return (
     <ThemeProvider>
         <DataProvider>
-            <HashRouter>
-                <div className="flex h-screen text-gray-800 dark:text-gray-200">
-                    <Sidebar 
-                        isMobileOpen={isMobileOpen} 
-                        setMobileOpen={setMobileOpen}
-                        isCollapsed={isCollapsed}
-                        setCollapsed={setCollapsed}
-                    />
+            <AppLayout isMobileOpen={isMobileOpen} setMobileOpen={setMobileOpen} isCollapsed={isCollapsed} setCollapsed={setCollapsed} />
+        </DataProvider>
+    </ThemeProvider>
+  );
+}
+
+function AppLayout({ isMobileOpen, setMobileOpen, isCollapsed, setCollapsed }: { isMobileOpen: boolean; setMobileOpen: (v: boolean) => void; isCollapsed: boolean; setCollapsed: (v: boolean) => void }) {
+  const { setBackupModalOpen, data, setData } = useData();
+  
+  const handleReset = () => {
+    if (window.confirm('Tüm verileri silmek istediğinizden emin misiniz?')) {
+      setData(JSON.parse(JSON.stringify(INITIAL_DATA)));
+      alert("Uygulama başarıyla sıfırlandı.");
+    }
+  };
+  
+  return (
+    <HashRouter>
+        <div className="flex h-screen text-gray-800 dark:text-gray-200">
+            <Sidebar 
+                isMobileOpen={isMobileOpen} 
+                setMobileOpen={setMobileOpen}
+                isCollapsed={isCollapsed}
+                setCollapsed={setCollapsed}
+                onBackup={() => setBackupModalOpen(true)}
+                onReset={handleReset}
+            />
                     <div className={`flex-1 flex flex-col transition-all duration-300 ${isCollapsed ? 'md:ml-16' : 'md:ml-64'}`}>
                         <Header onMenuClick={() => setMobileOpen(true)} />
                         <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto">
@@ -3082,8 +3122,6 @@ export default function App() {
                     </div>
                 </div>
             </HashRouter>
-        </DataProvider>
-    </ThemeProvider>
   );
 }
 
