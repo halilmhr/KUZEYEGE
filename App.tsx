@@ -555,7 +555,7 @@ const Sidebar: FC<{
                 <nav className="p-2 flex flex-col gap-1">
                     {navItems.map(item => <NavItem key={item.path} {...item} onClick={() => setMobileOpen(false)} />)}
                 </nav>
-                <div className="border-t border-gray-200 dark:border-gray-700 mt-auto pt-3 px-3 flex flex-col gap-2">
+                <div className={`border-t border-gray-200 dark:border-gray-700 mt-auto pt-3 px-3 flex flex-col gap-2 ${isCollapsed ? 'hidden' : ''}`}>
                     <button 
                         onClick={onBackup}
                         className="w-full flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-blue-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 text-white rounded-lg transition-all duration-200 shadow-md hover:shadow-lg text-xs font-medium"
